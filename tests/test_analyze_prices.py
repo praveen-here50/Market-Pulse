@@ -8,6 +8,8 @@ import pandas as pd
 import analytics
 import analyze_prices
 import fetch_prices
+from market_data import service
+from market_data.instruments import FNO_MARKET_CLOSE
 
 NOW = pd.Timestamp("2026-10-30 19:00", tz="Asia/Kolkata")
 DURING_SESSION = pd.Timestamp("2026-10-30 11:00", tz="Asia/Kolkata")
@@ -41,8 +43,15 @@ def add_placeholder(history, position):
     return history
 
 
+class FakeProvider:
+    name = "Fake provider"
+
+    def __init__(self, fake_fetch):
+        self.fetch_daily = fake_fetch
+
+
 def use_fake_market(monkeypatch, fake_fetch, now=NOW):
-    monkeypatch.setattr(fetch_prices, "fetch_history", fake_fetch)
+    monkeypatch.setattr(service, "PROVIDERS", [FakeProvider(fake_fetch)])
     monkeypatch.setattr(fetch_prices.pd.Timestamp, "now", lambda tz=None: now)
 
 
@@ -71,20 +80,22 @@ def test_bad_adj_close_fails():
 
 def test_prepare_removes_placeholders_and_says_so():
     history = add_placeholder(make_history(), 10)
-    cleaned, notes = analyze_prices.prepare_history(history, NOW)
+    cleaned, notes = analyze_prices.prepare_history(history, NOW, FNO_MARKET_CLOSE)
     assert len(cleaned) == 29
     assert history.index[10] not in cleaned.index
     assert notes == ["removed 1 zero-volume placeholder bar(s): 2026-10-11"]
 
 
 def test_prepare_leaves_out_todays_unfinished_bar():
-    cleaned, notes = analyze_prices.prepare_history(make_history(), DURING_SESSION)
+    cleaned, notes = analyze_prices.prepare_history(
+        make_history(), DURING_SESSION, FNO_MARKET_CLOSE
+    )
     assert cleaned.index[-1] == pd.Timestamp("2026-10-29", tz="Asia/Kolkata")
     assert notes == ["left out today's unfinished bar (2026-10-30)"]
 
 
 def test_prepare_keeps_a_finished_bar():
-    cleaned, notes = analyze_prices.prepare_history(make_history(), NOW)
+    cleaned, notes = analyze_prices.prepare_history(make_history(), NOW, FNO_MARKET_CLOSE)
     assert len(cleaned) == 30
     assert notes == []
 
@@ -97,7 +108,7 @@ def test_unknown_values_are_shown_as_na_not_as_numbers():
 
 def test_every_summary_metric_has_a_format():
     summary = analytics.summarize(make_history())
-    assert set(summary) == set(analyze_prices.METRIC_FORMATS)
+    assert set(summary) | {"Source"} == set(analyze_prices.METRIC_FORMATS)
 
 
 def test_all_symbols_completing_exits_zero(monkeypatch, capsys):
@@ -135,7 +146,7 @@ def test_provider_failure_is_reported_and_other_symbols_continue(monkeypatch, ca
 
     output = capsys.readouterr().out
     assert "3 of 4 symbols completed" in output
-    assert "FAILED TCS.NS: analysis failed: ConnectionError" in output
+    assert "FAILED TCS.NS: Fake provider: download failed: ConnectionError" in output
     assert "RELIANCE.NS" in output
 
 
@@ -147,6 +158,19 @@ def test_all_symbols_failing_prints_no_table(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "0 of 4 symbols completed" in output
     assert "Close" not in output.split("\n\n")[1]
+
+
+def test_table_names_the_source(monkeypatch, capsys):
+    use_fake_market(monkeypatch, lambda symbol, period: make_history())
+    analyze_prices.main()
+    assert "Fake provider" in capsys.readouterr().out
+
+
+def test_source_without_adj_close_is_refused_rather_than_estimated(monkeypatch, capsys):
+    use_fake_market(monkeypatch, lambda symbol, period: make_history().drop(columns="Adj Close"))
+
+    assert analyze_prices.main() == 1
+    assert "missing columns: ['Adj Close']" in capsys.readouterr().out
 
 
 def test_symbol_with_only_an_unfinished_bar_fails_cleanly(monkeypatch, capsys):

@@ -10,9 +10,10 @@ here is financial advice.
 | --- | --- | --- |
 | 1 | Environment and first market data retrieval | Done |
 | 2 | Pandas, financial calculations and data processing | Done |
-| 3 to 12 | Everything else in the project plan | Not started |
+| 3 | Multi-provider market-data architecture | Done |
+| 4 to 12 | Everything else in the project plan | Not started |
 
-MarketPulse is still a pair of command-line programs. There is no dashboard,
+MarketPulse is still a set of command-line programs. There is no dashboard,
 API, database, automation or AI yet.
 
 ## What Phase 1 does
@@ -41,6 +42,42 @@ and never touches the network.
 
 A metric that cannot be calculated from the data available prints as `n/a`.
 
+## What Phase 3 adds
+
+Programs no longer call Yahoo directly. They ask `market_data`, which tries each
+provider in turn and names the source in the output. If a fallback was used, the
+output also says what failed first.
+
+| Provider | Data | Limits |
+| --- | --- | --- |
+| Yahoo through `yfinance` | Daily bars, split-adjusted, with Adj Close | Unofficial. Has been missing at least one real session (18 Mar 2025) |
+| NSE bhavcopy files in `data\bhavcopy` | Official end-of-day bars | Files must be downloaded by hand. Not split-adjusted, and no Adj Close |
+
+`analyze_prices.py` needs Adj Close, so it cannot fall back to bhavcopy files and
+reports a failure instead of estimating. `fetch_prices.py` can fall back, but
+only if the files cover the period without a gap or a corporate action.
+
+### Using bhavcopy files
+
+MarketPulse never downloads from NSE, because NSE's Terms of Use prohibit
+automated data collection from its website. Its copyright policy allows
+downloads for personal, non-commercial or educational use, so download the
+files yourself:
+
+1. On nseindia.com, open the daily reports for the equity market.
+2. Download "Full Bhavcopy and Security Deliverable data", named like
+   `sec_bhavdata_full_29102026.csv`.
+3. Save it in `data\bhavcopy`. This folder is ignored by git, so NSE's data is
+   not republished with this code.
+4. Compare it with Yahoo:
+
+```bat
+.venv\Scripts\python.exe check_providers.py
+```
+
+Always trust the date inside a file, not its name: NSE's file named after a
+holiday or weekend repeats the previous session.
+
 ## Setup (Command Prompt)
 
 Requires Python 3.12.
@@ -65,6 +102,8 @@ The tests use synthetic data and need no network.
 
 - Data comes from Yahoo Finance through `yfinance`, an unofficial library. It
   is not an NSE or BSE feed and can change or break without notice.
+- Bhavcopy data belongs to NSE and is for personal, non-commercial or
+  educational use. Commercial use needs a licence from NSE Data.
 - These are daily bars, not live quotes. A bar's timestamp is its trading date
   at midnight IST, not the time of the last trade.
 - Prices are not adjusted for dividends. Yahoo does adjust them for splits.

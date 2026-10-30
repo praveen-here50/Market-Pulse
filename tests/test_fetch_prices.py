@@ -8,8 +8,24 @@ import pandas as pd
 import pytest
 
 import fetch_prices
+from market_data import service
+from market_data.instruments import FNO_MARKET_CLOSE, NON_FNO_MARKET_CLOSE
 
 NOW = pd.Timestamp("2026-10-30 19:00", tz="Asia/Kolkata")
+
+
+class FakeProvider:
+    """Stands in for Yahoo. Can simulate an outage for TCS.NS."""
+
+    name = "Fake provider"
+
+    def __init__(self, outage=False):
+        self.outage = outage
+
+    def fetch_daily(self, ticker, period):
+        if self.outage and ticker == "TCS.NS":
+            raise ConnectionError("simulated outage")
+        return make_history()
 
 
 def make_history():
@@ -99,34 +115,40 @@ def test_normal_weekend_is_not_stale():
 def test_bar_is_in_progress_before_the_close():
     latest = make_history().index.max()
     during_session = pd.Timestamp("2026-10-30 11:00", tz="Asia/Kolkata")
-    assert "IN PROGRESS" in fetch_prices.describe_latest_bar(latest, during_session)
-    assert fetch_prices.describe_latest_bar(latest, NOW) == "complete daily bar"
+    assert "IN PROGRESS" in fetch_prices.describe_latest_bar(
+        latest, during_session, FNO_MARKET_CLOSE
+    )
+    assert fetch_prices.describe_latest_bar(latest, NOW, FNO_MARKET_CLOSE) == "complete daily bar"
 
 
 def test_bar_is_in_progress_during_the_closing_auction():
     latest = make_history().index.max()
     during_auction = pd.Timestamp("2026-10-30 15:32", tz="Asia/Kolkata")
-    assert "IN PROGRESS" in fetch_prices.describe_latest_bar(latest, during_auction)
+    assert "IN PROGRESS" in fetch_prices.describe_latest_bar(
+        latest, during_auction, FNO_MARKET_CLOSE
+    )
+
+
+def test_non_fno_bar_is_complete_during_the_fno_closing_auction():
+    latest = make_history().index.max()
+    during_auction = pd.Timestamp("2026-10-30 15:32", tz="Asia/Kolkata")
+    result = fetch_prices.describe_latest_bar(latest, during_auction, NON_FNO_MARKET_CLOSE)
+    assert result == "complete daily bar"
 
 
 def test_provider_failure_is_reported_and_other_symbols_continue(monkeypatch, capsys):
-    def fake_fetch(symbol):
-        if symbol == "TCS.NS":
-            raise ConnectionError("simulated outage")
-        return make_history()
-
-    monkeypatch.setattr(fetch_prices, "fetch_history", fake_fetch)
+    monkeypatch.setattr(service, "PROVIDERS", [FakeProvider(outage=True)])
     monkeypatch.setattr(fetch_prices.pd.Timestamp, "now", lambda tz=None: NOW)
 
     assert fetch_prices.main() == 1
 
     output = capsys.readouterr().out
     assert "3 of 4 symbols passed" in output
-    assert "FAILED TCS.NS: download failed: ConnectionError" in output
+    assert "FAILED TCS.NS: Fake provider: download failed: ConnectionError" in output
     assert "RELIANCE.NS" in output
 
 
 def test_all_symbols_passing_exits_zero(monkeypatch):
-    monkeypatch.setattr(fetch_prices, "fetch_history", lambda symbol: make_history())
+    monkeypatch.setattr(service, "PROVIDERS", [FakeProvider()])
     monkeypatch.setattr(fetch_prices.pd.Timestamp, "now", lambda tz=None: NOW)
     assert fetch_prices.main() == 0

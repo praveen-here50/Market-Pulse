@@ -10,11 +10,14 @@ import pandas as pd
 
 import analytics
 import fetch_prices
+from market_data.instruments import market_close_for
+from market_data.service import fetch_with_fallback
 
 # One year gives about 247 bars: enough for SMA 200 and for 52-week levels.
 ANALYSIS_PERIOD = "1y"
 
 METRIC_FORMATS = {
+    "Source": "{}",
     "Bars used": "{:d}",
     "First bar": "{:%Y-%m-%d}",
     "Last bar": "{:%Y-%m-%d}",
@@ -47,7 +50,7 @@ def validate_for_analysis(history, now):
     return []
 
 
-def prepare_history(history, now):
+def prepare_history(history, now, market_close):
     """Return (bars that are safe to calculate on, notes about what was removed)."""
     cleaned, removed = analytics.remove_placeholder_bars(history)
     notes = []
@@ -56,7 +59,9 @@ def prepare_history(history, now):
         dates = ", ".join(f"{date:%Y-%m-%d}" for date in removed)
         notes.append(f"removed {len(removed)} zero-volume placeholder bar(s): {dates}")
 
-    if not cleaned.empty and fetch_prices.is_bar_in_progress(cleaned.index[-1], now):
+    if not cleaned.empty and fetch_prices.is_bar_in_progress(
+        cleaned.index[-1], now, market_close
+    ):
         notes.append(f"left out today's unfinished bar ({cleaned.index[-1]:%Y-%m-%d})")
         cleaned = cleaned.iloc[:-1]
 
@@ -87,21 +92,26 @@ def main():
     failed = {}
 
     print(f"MarketPulse Phase 2 | fetched at {now:%Y-%m-%d %H:%M:%S %Z}")
-    print("Source: Yahoo Finance via yfinance (unofficial). Daily bars, not live quotes.")
+    print("Daily bars, not live quotes. Neither provider is a real-time exchange feed.")
     print("Prices in INR. Returns and risk include dividends; indicators use the traded Close.")
     print("Indicators describe past prices. They are not predictions or financial advice.")
 
     for symbol in fetch_prices.SYMBOLS:
         # One broken symbol should not stop the others from being reported.
         try:
-            history = fetch_prices.fetch_history(symbol, period=ANALYSIS_PERIOD)
-            problems = validate_for_analysis(history, now)
+            result = fetch_with_fallback(
+                symbol, ANALYSIS_PERIOD, lambda table: validate_for_analysis(table, now)
+            )
+            problems = result.failures if result.history is None else []
             if not problems:
-                cleaned, symbol_notes = prepare_history(history, now)
+                cleaned, symbol_notes = prepare_history(
+                    result.history, now, market_close_for(symbol)
+                )
+                symbol_notes += [f"fallback used because {item}" for item in result.failures]
                 if cleaned.empty:
                     problems = ["no complete bars left after cleaning"]
                 else:
-                    summaries[symbol] = analytics.summarize(cleaned)
+                    summaries[symbol] = {"Source": result.source, **analytics.summarize(cleaned)}
                     notes[symbol] = symbol_notes
         except Exception as error:
             problems = [f"analysis failed: {type(error).__name__}: {error}"]

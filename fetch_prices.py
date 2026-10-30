@@ -5,27 +5,18 @@ Exit code: 0 if every symbol passed validation, 1 if any symbol failed.
 """
 
 import sys
-import warnings
-from datetime import time, timedelta
+from datetime import timedelta
 
 import pandas as pd
-import yfinance as yf
 
-# yfinance 1.7 triggers this deprecation inside its own code on pandas 3.1.
-# Only this category from yfinance is hidden, so our own warnings still show.
-warnings.filterwarnings("ignore", category=pd.errors.Pandas4Warning, module=r"yfinance\.")
+from market_data.instruments import INSTRUMENTS, market_close_for
+from market_data.service import fetch_with_fallback
 
-SYMBOLS = ["RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS"]  # .NS means the NSE listing
+SYMBOLS = list(INSTRUMENTS)  # .NS means the NSE listing
 PERIOD = "1mo"
-INTERVAL = "1d"
 ROWS_TO_SHOW = 5
 
 MARKET_TIMEZONE = "Asia/Kolkata"
-
-# Since 3 Aug 2026, F&O stocks stop continuous trading at 15:15 and get their
-# closing price from an auction ending at 15:35. All our symbols are F&O stocks.
-# Non-F&O stocks still close at 15:30, so this must be revisited in Phase 3.
-MARKET_CLOSE = time(15, 35)
 
 PRICE_COLUMNS = ["Open", "High", "Low", "Close"]
 REQUIRED_COLUMNS = [*PRICE_COLUMNS, "Volume"]
@@ -37,19 +28,6 @@ MAX_AGE = timedelta(days=5)
 # Yahoo stores prices at low precision (1204.300049 for 1204.30), so comparing
 # High and Close exactly could reject a perfectly good row.
 PRICE_TOLERANCE = 0.01
-
-
-def fetch_history(symbol, period=PERIOD):
-    """Return Yahoo's daily bars for one symbol as a DataFrame.
-
-    auto_adjust=False keeps Close as the traded close. With the default (True),
-    past prices are lowered for dividends and no longer match the exchange's
-    published values.
-
-    A wrong symbol does NOT raise an exception here: yfinance returns an empty
-    table, so callers must always validate what they get back.
-    """
-    return yf.Ticker(symbol).history(period=period, interval=INTERVAL, auto_adjust=False)
 
 
 def validate_history(history, now):
@@ -91,19 +69,19 @@ def validate_history(history, now):
     return problems
 
 
-def is_bar_in_progress(latest, now):
+def is_bar_in_progress(latest, now, market_close):
     """Return True if the newest bar belongs to a session that has not closed yet."""
-    return latest.date() == now.date() and now.time() < MARKET_CLOSE
+    return latest.date() == now.date() and now.time() < market_close
 
 
-def describe_latest_bar(latest, now):
+def describe_latest_bar(latest, now, market_close):
     """Say whether the newest bar is final or still changing during today's session."""
-    if is_bar_in_progress(latest, now):
+    if is_bar_in_progress(latest, now, market_close):
         return "IN PROGRESS: today's session has not closed, values will change"
     return "complete daily bar"
 
 
-def print_report(symbol, history, now):
+def print_report(symbol, history, now, source):
     """Print the most recent rows and the latest timestamp for a validated symbol."""
     latest = history.index.max()
 
@@ -111,10 +89,10 @@ def print_report(symbol, history, now):
     table.index = table.index.date
     table.index.name = "Date"
 
-    print(f"\n{symbol}")
+    print(f"\n{symbol} | source: {source}")
     print(table.to_string(float_format="{:.2f}".format))
     print(f"Latest available timestamp: {latest}")
-    print(f"Latest bar status:          {describe_latest_bar(latest, now)}")
+    print(f"Latest bar status:          {describe_latest_bar(latest, now, market_close_for(symbol))}")
 
 
 def main():
@@ -122,21 +100,17 @@ def main():
     failed = {}
 
     print(f"MarketPulse Phase 1 | fetched at {now:%Y-%m-%d %H:%M:%S %Z}")
-    print("Source: Yahoo Finance via yfinance (unofficial). Daily bars, not live quotes.")
+    print("Daily bars, not live quotes. Neither provider is a real-time exchange feed.")
     print("Prices in INR. Timestamps mark the trading date, not the time of the last trade.")
 
     for symbol in SYMBOLS:
-        # One broken symbol should not stop the others from being reported.
-        try:
-            history = fetch_history(symbol)
-            problems = validate_history(history, now)
-        except Exception as error:
-            problems = [f"download failed: {type(error).__name__}: {error}"]
-
-        if problems:
-            failed[symbol] = problems
+        result = fetch_with_fallback(symbol, PERIOD, lambda table: validate_history(table, now))
+        if result.history is None:
+            failed[symbol] = result.failures
         else:
-            print_report(symbol, history, now)
+            print_report(symbol, result.history, now, result.source)
+            for failure in result.failures:
+                print(f"Fallback used because {failure}")
 
     print(f"\nValidation: {len(SYMBOLS) - len(failed)} of {len(SYMBOLS)} symbols passed")
     for symbol, problems in failed.items():
