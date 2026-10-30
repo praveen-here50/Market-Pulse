@@ -10,6 +10,10 @@ from market_data.yahoo import YahooProvider
 PROVIDERS = [YahooProvider(), BhavcopyFileProvider()]
 
 
+class SplitsUnavailable(Exception):
+    """No provider could say which splits happened."""
+
+
 @dataclass
 class FetchResult:
     history: pd.DataFrame | None
@@ -39,3 +43,19 @@ def fetch_with_fallback(ticker, period, check):
         failures.append(f"{provider.name}: {'; '.join(problems)}")
 
     return FetchResult(None, None, failures)
+
+
+def fetch_splits(ticker, since):
+    """Return splits since a date from the first provider that knows them, or raise.
+
+    Bhavcopy files hold no split history, so they are skipped. There is no safe
+    default here: assuming "no splits" could misstate a holding by half.
+    """
+    failures = []
+    for provider in PROVIDERS:
+        if hasattr(provider, "fetch_splits"):
+            try:
+                return provider.fetch_splits(ticker, since)
+            except Exception as error:
+                failures.append(f"{provider.name}: {type(error).__name__}: {error}")
+    raise SplitsUnavailable("; ".join(failures) or "no provider has split history")

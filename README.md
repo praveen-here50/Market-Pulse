@@ -13,7 +13,8 @@ here is financial advice.
 | 3 | Multi-provider market-data architecture | Done |
 | 4 | FastAPI backend and API endpoints | Done |
 | 5 | Streamlit dashboard and interactive charts | Done |
-| 6 to 12 | Everything else in the project plan | Not started |
+| 6 | Watchlist and portfolio | Done |
+| 7 to 12 | Everything else in the project plan | Not started |
 
 MarketPulse is a set of command-line programs, a local API and a local dashboard.
 There is no database, automation or AI yet.
@@ -128,6 +129,30 @@ four stocks. It follows your light or dark theme.
   click. A new close can take that long to appear.
 - Charts calculate moving averages and RSI from the API's two-decimal prices, so
   a chart value can differ from `/metrics` by about 0.01.
+
+## What Phase 6 adds
+
+The dashboard has Watchlist and Portfolio tabs, backed by new API endpoints.
+
+| Endpoint | Does |
+| --- | --- |
+| `POST /stocks` | Adds a stock, if a provider has valid data for it |
+| `DELETE /stocks/{ticker}` | Removes a stock. Refused while it has trades |
+| `GET /trades`, `POST /trades` | Lists or records buys and sells |
+| `DELETE /trades/{id}` | Deletes a trade. Refused if a later sale needs its shares |
+| `GET /portfolio` | Values every holding at the last finished close |
+
+- Your data stays in `data\user` on this computer. Git ignores it. Back it up
+  yourself, because Git will not. Phase 7 replaces these files with a database.
+- Holdings are always recalculated from your trades, using the average cost
+  method. To correct a mistake, delete the trade and record it again.
+- Splits and bonus issues are applied automatically from Yahoo's history.
+- If a stock cannot be valued, its row and the portfolio totals show `n/a`, so a
+  partial total is never shown as your whole portfolio.
+- Quantity must be a whole number of shares. You state whether a stock trades in
+  F&O, because closing time depends on it and MarketPulse never reads NSE's list.
+- Results leave out brokerage, taxes and dividends, so they are not your real
+  returns or tax figures. Nothing here is financial advice.
 
 ## Setup (Command Prompt)
 

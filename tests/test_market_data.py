@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 import check_providers
-from market_data import service
+from market_data import service, yahoo
 from market_data.bhavcopy import BhavcopyFileProvider, ProviderError
 from market_data.compare import compare_closes
 from market_data.instruments import (
@@ -287,3 +287,41 @@ def test_check_without_files_does_not_claim_agreement(tmp_path):
     )
     assert not agreed
     assert "no bars found" in lines[0]
+
+
+class FakeTicker:
+    def __init__(self, history):
+        self.table = history
+
+    def history(self, **options):
+        return self.table
+
+
+def test_yahoo_splits_come_back_as_dates_and_ratios(monkeypatch):
+    dates = pd.date_range("2025-08-25", periods=3, freq="D", tz="Asia/Kolkata")
+    table = pd.DataFrame({"Stock Splits": [0.0, 2.0, 0.0]}, index=dates)
+    monkeypatch.setattr(yahoo.yf, "Ticker", lambda ticker: FakeTicker(table))
+
+    assert yahoo.YahooProvider().fetch_splits("TCS.NS", "2025-08-01") == {"2025-08-26": 2.0}
+
+
+def test_yahoo_rows_without_splits_mean_no_splits(monkeypatch):
+    dates = pd.date_range("2025-08-25", periods=2, freq="D", tz="Asia/Kolkata")
+    table = pd.DataFrame({"Stock Splits": [0.0, 0.0]}, index=dates)
+    monkeypatch.setattr(yahoo.yf, "Ticker", lambda ticker: FakeTicker(table))
+
+    assert yahoo.YahooProvider().fetch_splits("TCS.NS", "2025-08-01") == {}
+
+
+def test_yahoo_empty_history_is_a_failure_and_not_no_splits(monkeypatch):
+    monkeypatch.setattr(yahoo.yf, "Ticker", lambda ticker: FakeTicker(pd.DataFrame()))
+
+    with pytest.raises(ConnectionError):
+        yahoo.YahooProvider().fetch_splits("TCS.NS", "2025-08-01")
+
+
+def test_splits_are_never_assumed_when_no_provider_has_them(monkeypatch):
+    monkeypatch.setattr(service, "PROVIDERS", [FakeProvider("no split history")])
+
+    with pytest.raises(service.SplitsUnavailable):
+        service.fetch_splits("TCS.NS", "2025-08-01")

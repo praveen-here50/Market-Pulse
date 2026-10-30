@@ -251,3 +251,99 @@ def test_gridlines_are_never_dashed():
 
 def test_rsi_window_matches_the_analytics_default():
     assert analytics.RSI_WINDOW == 14
+
+
+def api_change_answer(monkeypatch, status, body=None):
+    def fake_request(method, url, json, timeout):
+        return httpx.Response(status, json=body, request=httpx.Request(method, url))
+
+    monkeypatch.setattr(support.httpx, "request", fake_request)
+
+
+def test_send_returns_the_json_answer(monkeypatch):
+    api_change_answer(monkeypatch, 201, {"id": "abc"})
+    assert support.send_json("POST", "/trades", {}) == {"id": "abc"}
+
+
+def test_send_accepts_an_empty_answer(monkeypatch):
+    api_change_answer(monkeypatch, 204)
+    assert support.send_json("DELETE", "/trades/abc") is None
+
+
+@pytest.mark.parametrize("status", [404, 409, 422])
+def test_send_reports_a_refusal_with_its_reason(monkeypatch, status):
+    api_change_answer(monkeypatch, status, {"detail": "only 10 held"})
+
+    with pytest.raises(support.RequestRejected, match="only 10 held"):
+        support.send_json("POST", "/trades", {})
+
+
+def test_send_reads_validation_errors(monkeypatch):
+    api_change_answer(monkeypatch, 422, {"detail": [{"msg": "must be positive"}, {"msg": "bad date"}]})
+
+    with pytest.raises(support.RequestRejected, match="must be positive; bad date"):
+        support.send_json("POST", "/trades", {})
+
+
+def test_send_reports_missing_market_data(monkeypatch):
+    api_change_answer(monkeypatch, 503, {"detail": {"message": "x", "failures": ["Yahoo: down"]}})
+
+    with pytest.raises(support.DataUnavailable):
+        support.send_json("POST", "/trades", {})
+
+
+def test_send_reports_a_stopped_api(monkeypatch):
+    def refuse(method, url, json, timeout):
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(support.httpx, "request", refuse)
+
+    with pytest.raises(support.ApiNotRunning):
+        support.send_json("POST", "/trades", {})
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"), [(2000.0, "+₹2,000.00"), (-1500.5, "-₹1,500.50"), (0.0, "+₹0.00"), (None, "n/a")]
+)
+def test_signed_price(value, expected):
+    assert support.format_signed_price(value) == expected
+
+
+def test_quantity_shows_whole_and_split_shares():
+    assert support.format_quantity(1500.0) == "1,500"
+    assert support.format_quantity(12.5) == "12.5"
+    assert support.format_quantity(None) == "n/a"
+
+
+def test_holdings_table_shows_unknown_values_as_na():
+    holding = {
+        "ticker": "TCS.NS",
+        "quantity": None,
+        "average_cost": None,
+        "invested": None,
+        "last_close": None,
+        "last_close_date": None,
+        "market_value": None,
+        "unrealised": None,
+        "unrealised_fraction": None,
+        "realised": None,
+    }
+    row = support.holdings_table([holding]).loc["TCS.NS"]
+    assert set(row) == {"n/a"}
+
+
+def test_trades_table_is_newest_first():
+    trades = [
+        {"trade_date": "2026-01-01", "ticker": "TCS.NS", "side": "buy", "quantity": 1, "price": 1.0},
+        {"trade_date": "2026-02-01", "ticker": "TCS.NS", "side": "sell", "quantity": 1, "price": 2.0},
+    ]
+    table = support.trades_table(trades)
+    assert list(table.index) == ["2026-02-01", "2026-01-01"]
+    assert table.iloc[0]["Side"] == "Sell"
+
+
+def test_watchlist_table_uses_readable_values():
+    stock = {"ticker": "IRCTC.NS", "nse_symbol": "IRCTC", "is_fno": False, "market_close": "15:30"}
+    row = support.watchlist_table([stock]).loc["IRCTC.NS"]
+    assert row["F&O"] == "No"
+    assert row["Market close"] == "15:30"

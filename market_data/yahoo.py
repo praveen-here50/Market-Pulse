@@ -26,3 +26,16 @@ class YahooProvider:
         table, so callers must always validate what they get back.
         """
         return yf.Ticker(ticker).history(period=period, interval=INTERVAL, auto_adjust=False)
+
+    def fetch_splits(self, ticker, since):
+        """Return splits and bonus issues from a date on, as {ISO date: ratio}.
+
+        This reads history() rather than the .splits property because rows with
+        no splits and an empty table can be told apart: empty means the download
+        failed, and an empty dict must only ever mean "no splits".
+        """
+        history = yf.Ticker(ticker).history(start=since, interval=INTERVAL, auto_adjust=False)
+        if history.empty:
+            raise ConnectionError(f"no history returned for {ticker} since {since}")
+        splits = history.loc[history["Stock Splits"] != 0, "Stock Splits"]
+        return {f"{day:%Y-%m-%d}": float(ratio) for day, ratio in splits.items()}

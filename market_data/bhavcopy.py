@@ -11,8 +11,6 @@ from pathlib import Path
 
 import pandas as pd
 
-from market_data.instruments import INSTRUMENTS
-
 BHAVCOPY_FOLDER = Path("data") / "bhavcopy"
 EQUITY_SERIES = "EQ"
 MARKET_TIMEZONE = "Asia/Kolkata"
@@ -56,7 +54,7 @@ class BhavcopyFileProvider:
         serves the previous session under a non-trading day's name: its
         15 Jan 2026 file holds 14 Jan data. Such repeats are dropped here.
         """
-        nse_symbol = INSTRUMENTS[ticker].nse_symbol
+        nse_symbol = ticker.removesuffix(".NS")
         rows = [read_file(path, nse_symbol) for path in sorted(self.folder.glob("*.csv"))]
         rows = [row for row in rows if not row.empty]
         if not rows:

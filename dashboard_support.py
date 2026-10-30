@@ -1,4 +1,4 @@
-"""MarketPulse Phase 5: the parts of the dashboard that do not need Streamlit.
+"""MarketPulse: the parts of the dashboard that do not need Streamlit.
 
 This covers calling the API, formatting values and building charts, so all of
 it can be tested without a browser. dashboard.py only lays the page out.
@@ -82,6 +82,35 @@ class DataUnavailable(Exception):
         self.failures = failures
 
 
+class RequestRejected(Exception):
+    """The API understood the request and refused it. The message says why."""
+
+
+def rejection_message(response):
+    """Return the API's reason. Validation errors arrive as a list of details."""
+    detail = response.json()["detail"]
+    if isinstance(detail, list):
+        return "; ".join(item["msg"] for item in detail)
+    return str(detail)
+
+
+def send_json(method, path, body=None):
+    """Send a change to the API. Return its JSON answer, or None if it has none."""
+    try:
+        response = httpx.request(
+            method, f"{API_URL}{path}", json=body, timeout=REQUEST_TIMEOUT_SECONDS
+        )
+    except httpx.TransportError as error:
+        raise ApiNotRunning(str(error)) from error
+
+    if response.status_code == 503:
+        raise DataUnavailable(response.json()["detail"]["failures"])
+    if response.status_code in (404, 409, 422):
+        raise RequestRejected(rejection_message(response))
+    response.raise_for_status()
+    return response.json() if response.content else None
+
+
 def fetch_json(path):
     """Return the API's JSON answer for a path, or raise one of the errors above."""
     try:
@@ -110,6 +139,18 @@ def format_unsigned_percent(value):
 
 def format_rsi(value):
     return MISSING if value is None else f"{value:.1f}"
+
+
+def format_signed_price(value):
+    """Return a gain or loss with its sign before the currency."""
+    if value is None:
+        return MISSING
+    sign = "-" if value < 0 else "+"
+    return f"{sign}₹{abs(value):,.2f}"
+
+
+def format_quantity(value):
+    return MISSING if value is None else f"{value:,g}"
 
 
 FORMATTERS = {
@@ -176,6 +217,63 @@ def table_view(frame):
             table[label] = [format_price(None if pd.isna(v) else v) for v in frame[column]]
     table["RSI 14"] = [format_rsi(None if pd.isna(v) else v) for v in frame["rsi_14"]]
     return table.iloc[::-1]
+
+
+def holdings_table(holdings):
+    """Return one formatted row per holding. Unknown values stay n/a."""
+    rows = [
+        {
+            "Stock": holding["ticker"],
+            "Quantity": format_quantity(holding["quantity"]),
+            "Average cost": format_price(holding["average_cost"]),
+            "Invested": format_price(holding["invested"]),
+            "Last close": format_price(holding["last_close"]),
+            "Close date": holding["last_close_date"] or MISSING,
+            "Market value": format_price(holding["market_value"]),
+            "Unrealised": format_signed_price(holding["unrealised"]),
+            "Unrealised %": format_percent(holding["unrealised_fraction"]),
+            "Realised": format_signed_price(holding["realised"]),
+        }
+        for holding in holdings
+    ]
+    return pd.DataFrame(rows).set_index("Stock")
+
+
+def watchlist_table(stocks):
+    """Return one row per followed stock, with readable headings."""
+    rows = [
+        {
+            "Stock": stock["ticker"],
+            "NSE symbol": stock["nse_symbol"],
+            "F&O": "Yes" if stock["is_fno"] else "No",
+            "Market close": stock["market_close"],
+        }
+        for stock in stocks
+    ]
+    return pd.DataFrame(rows).set_index("Stock")
+
+
+def trades_table(trades):
+    """Return one formatted row per trade, newest first."""
+    rows = [
+        {
+            "Date": trade["trade_date"],
+            "Stock": trade["ticker"],
+            "Side": trade["side"].capitalize(),
+            "Quantity": format_quantity(trade["quantity"]),
+            "Price": format_price(trade["price"]),
+        }
+        for trade in reversed(trades)
+    ]
+    return pd.DataFrame(rows).set_index("Date")
+
+
+def trade_label(trade):
+    """Describe a trade in the list of trades that can be deleted."""
+    return (
+        f"{trade['trade_date']} {trade['side']} {format_quantity(trade['quantity'])} "
+        f"{trade['ticker']} at {format_price(trade['price'])}"
+    )
 
 
 def apply_style(figure, theme, height):

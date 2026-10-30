@@ -52,7 +52,56 @@ def make_metrics():
     return metrics
 
 
-def serve(monkeypatch, *, stocks=STOCKS, history=None, metrics=None):
+EMPTY_PORTFOLIO = {
+    "data_type": "end_of_day",
+    "disclaimer": "Valued at the last close, not a live price. Leaves out brokerage.",
+    "holdings": [],
+    "total_invested": 0,
+    "total_market_value": 0,
+    "total_unrealised": 0,
+    "total_realised": 0,
+}
+
+
+def make_holding(**changes):
+    holding = {
+        "ticker": "TCS.NS",
+        "quantity": 10,
+        "average_cost": 800.0,
+        "invested": 8000.0,
+        "last_close": 1000.0,
+        "last_close_date": "2026-10-30",
+        "source": "Fake provider",
+        "market_value": 10000.0,
+        "unrealised": 2000.0,
+        "unrealised_fraction": 0.25,
+        "realised": 0.0,
+        "problem": None,
+    }
+    return holding | changes
+
+
+def make_portfolio(*holdings, **totals):
+    return EMPTY_PORTFOLIO | {
+        "holdings": list(holdings),
+        "total_invested": 8000.0,
+        "total_market_value": 10000.0,
+        "total_unrealised": 2000.0,
+        "total_realised": 0.0,
+    } | totals
+
+
+TRADE = {
+    "id": "abc",
+    "ticker": "TCS.NS",
+    "side": "buy",
+    "quantity": 10,
+    "price": 800.0,
+    "trade_date": "2026-01-10",
+}
+
+
+def serve(monkeypatch, *, stocks=STOCKS, history=None, metrics=None, portfolio=None, trades=()):
     """Replace the API. An exception given for a value is raised instead of returned."""
 
     def answer(value):
@@ -63,6 +112,10 @@ def serve(monkeypatch, *, stocks=STOCKS, history=None, metrics=None):
     def fake_fetch(path):
         if path == "/stocks":
             return answer(stocks)
+        if path == "/portfolio":
+            return answer(EMPTY_PORTFOLIO if portfolio is None else portfolio)
+        if path == "/trades":
+            return list(trades)
         if path.endswith("/metrics"):
             return answer(make_metrics() if metrics is None else metrics)
         return answer(make_history() if history is None else history)
@@ -181,3 +234,153 @@ def test_unfinished_session_is_called_out(monkeypatch):
 def test_finished_session_gets_no_warning(monkeypatch):
     serve(monkeypatch)
     assert "has not closed" not in all_text(run_page())
+
+
+def record_changes(monkeypatch, error=None):
+    """Replace send_json and return the list of changes the page tries to make."""
+    sent = []
+
+    def fake_send(method, path, body=None):
+        sent.append((method, path, body))
+        if error:
+            raise error
+
+    monkeypatch.setattr(support, "send_json", fake_send)
+    return sent
+
+
+def button(page, label):
+    return next(item for item in page.button if item.label == label)
+
+
+def test_portfolio_shows_totals_and_the_valuation_disclaimer(monkeypatch):
+    serve(monkeypatch, portfolio=make_portfolio(make_holding()), trades=[TRADE])
+
+    page = run_page()
+
+    tiles = tile_values(page)
+    assert not page.exception
+    assert tiles["Market value"] == "₹10,000.00"
+    assert tiles["Unrealised P&L"] == "+₹2,000.00"
+    assert any("not a live price" in info.value for info in page.info)
+
+
+def test_empty_portfolio_invites_a_first_trade(monkeypatch):
+    serve(monkeypatch)
+
+    page = run_page()
+
+    assert not page.exception
+    assert "Market value" not in tile_values(page)
+    assert any("No trades recorded yet" in item.value for item in page.markdown)
+
+
+def test_holding_that_cannot_be_valued_is_called_out(monkeypatch):
+    unknown = make_holding(market_value=None, unrealised=None, problem="Yahoo: down")
+    portfolio = make_portfolio(unknown, total_market_value=None, total_unrealised=None)
+    serve(monkeypatch, portfolio=portfolio)
+
+    page = run_page()
+
+    assert tile_values(page)["Market value"] == "n/a"
+    assert "TCS.NS could not be valued" in all_text(page)
+    assert "Yahoo: down" in all_text(page)
+
+
+def test_saving_a_trade_sends_it_to_the_api(monkeypatch):
+    serve(monkeypatch)
+    sent = record_changes(monkeypatch)
+
+    page = run_page()
+    next(item for item in page.number_input if item.label == "Price per share (₹)").set_value(812.5)
+    next(item for item in page.number_input if item.label == "Quantity").set_value(3)
+    button(page, "Save trade").click().run()
+
+    method, path, body = sent[0]
+    assert (method, path) == ("POST", "/trades")
+    assert body["quantity"] == 3
+    assert body["price"] == 812.5
+    assert body["side"] == "buy"
+
+
+def test_refused_sale_shows_the_reason(monkeypatch):
+    serve(monkeypatch)
+    record_changes(monkeypatch, support.RequestRejected("only 10 held then"))
+
+    page = run_page()
+    button(page, "Save trade").click().run()
+
+    assert not page.exception
+    assert "only 10 held then" in all_text(page)
+
+
+def test_save_during_an_outage_says_it_was_not_saved(monkeypatch):
+    serve(monkeypatch)
+    record_changes(monkeypatch, support.DataUnavailable(["Yahoo: down"]))
+
+    page = run_page()
+    button(page, "Save trade").click().run()
+
+    assert "Not saved" in all_text(page)
+
+
+def test_saving_clears_the_cached_valuation(monkeypatch):
+    calls = []
+    serve(monkeypatch)
+    plain_fetch = support.fetch_json
+
+    def counting_fetch(path):
+        if path == "/portfolio":
+            calls.append(path)
+        return plain_fetch(path)
+
+    monkeypatch.setattr(support, "fetch_json", counting_fetch)
+    record_changes(monkeypatch)
+
+    page = run_page()
+    assert len(calls) == 1
+    button(page, "Save trade").click().run()
+
+    assert len(calls) == 2
+
+
+def test_deleting_a_trade_uses_its_id(monkeypatch):
+    serve(monkeypatch, portfolio=make_portfolio(make_holding()), trades=[TRADE])
+    sent = record_changes(monkeypatch)
+
+    page = run_page()
+    button(page, "Delete trade").click().run()
+
+    assert sent == [("DELETE", "/trades/abc", None)]
+
+
+def test_adding_a_stock_sends_a_clean_ticker_and_the_fno_choice(monkeypatch):
+    serve(monkeypatch)
+    sent = record_changes(monkeypatch)
+
+    page = run_page()
+    page.text_input[0].set_value(" irctc.ns ")
+    page.checkbox[0].set_value(True)
+    button(page, "Add to watchlist").click().run()
+
+    assert sent == [("POST", "/stocks", {"ticker": "IRCTC.NS", "is_fno": True})]
+
+
+def test_add_with_no_ticker_sends_nothing(monkeypatch):
+    serve(monkeypatch)
+    sent = record_changes(monkeypatch)
+
+    page = run_page()
+    button(page, "Add to watchlist").click().run()
+
+    assert sent == []
+
+
+def test_removing_a_stock_sends_it_to_the_api(monkeypatch):
+    serve(monkeypatch)
+    sent = record_changes(monkeypatch)
+
+    page = run_page()
+    button(page, "Remove from watchlist").click().run()
+
+    assert sent == [("DELETE", "/stocks/TCS.NS", None)]
