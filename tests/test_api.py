@@ -165,6 +165,13 @@ def test_history_marks_todays_unfinished_bar(market):
 
     assert len(body["bars"]) == 3
     assert "IN PROGRESS" in body["latest_bar_status"]
+    assert body["latest_bar_in_progress"] is True
+
+
+def test_history_marks_a_finished_bar(market):
+    market(FakeProvider(table=make_history(3)))
+
+    assert client.get("/stocks/TCS.NS/history").json()["latest_bar_in_progress"] is False
 
 
 def test_history_from_a_source_without_adj_close_gives_null(market):

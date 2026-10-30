@@ -12,10 +12,11 @@ here is financial advice.
 | 2 | Pandas, financial calculations and data processing | Done |
 | 3 | Multi-provider market-data architecture | Done |
 | 4 | FastAPI backend and API endpoints | Done |
-| 5 to 12 | Everything else in the project plan | Not started |
+| 5 | Streamlit dashboard and interactive charts | Done |
+| 6 to 12 | Everything else in the project plan | Not started |
 
-MarketPulse is a set of command-line programs and a local API. There is no
-dashboard, database, automation or AI yet.
+MarketPulse is a set of command-line programs, a local API and a local dashboard.
+There is no database, automation or AI yet.
 
 ## What Phase 1 does
 
@@ -106,6 +107,27 @@ Percentages are fractions (0.05 means 5%). A value we cannot calculate is `null`
 The API listens only on this computer and has no login, so do not expose it to a
 network. Each data request fetches from Yahoo again, because caching arrives in
 Phase 7.
+
+## What Phase 5 adds
+
+`dashboard.py` is a Streamlit page that reads everything from the API. It never
+contacts a data provider. Start the API, then the dashboard in a second terminal:
+
+```bat
+.venv\Scripts\python.exe -m uvicorn api:app --reload
+.venv\Scripts\python.exe -m streamlit run dashboard.py
+```
+
+It opens at http://localhost:8501 and shows headline numbers, price with moving
+averages, volume, RSI, a table of every plotted value, and a comparison of all
+four stocks. It follows your light or dark theme.
+
+- The page stays honest when data is missing: a stopped API, an outage and a
+  fallback source without Adj Close each get their own message.
+- API answers are kept for 5 minutes, because Streamlit reruns the page on every
+  click. A new close can take that long to appear.
+- Charts calculate moving averages and RSI from the API's two-decimal prices, so
+  a chart value can differ from `/metrics` by about 0.01.
 
 ## Setup (Command Prompt)
 

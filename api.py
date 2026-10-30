@@ -64,6 +64,7 @@ class DataResponse(BaseModel):
 
 class HistoryResponse(DataResponse):
     latest_bar_status: str
+    latest_bar_in_progress: bool
     bars: list[Bar]
 
 
@@ -164,13 +165,13 @@ def get_history(ticker: str, period: Literal["1mo", "1y"] = "1mo") -> HistoryRes
     bars, source, notes = load_clean_bars(
         ticker, period, lambda table: fetch_prices.validate_history(table, now)
     )
+    market_close = market_close_for(ticker)
     return HistoryResponse(
         ticker=ticker,
         source=source,
         notes=notes,
-        latest_bar_status=fetch_prices.describe_latest_bar(
-            bars.index[-1], now, market_close_for(ticker)
-        ),
+        latest_bar_status=fetch_prices.describe_latest_bar(bars.index[-1], now, market_close),
+        latest_bar_in_progress=fetch_prices.is_bar_in_progress(bars.index[-1], now, market_close),
         bars=[to_bar(day, row) for day, row in bars.iterrows()],
     )
 
