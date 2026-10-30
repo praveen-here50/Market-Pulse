@@ -11,10 +11,11 @@ here is financial advice.
 | 1 | Environment and first market data retrieval | Done |
 | 2 | Pandas, financial calculations and data processing | Done |
 | 3 | Multi-provider market-data architecture | Done |
-| 4 to 12 | Everything else in the project plan | Not started |
+| 4 | FastAPI backend and API endpoints | Done |
+| 5 to 12 | Everything else in the project plan | Not started |
 
-MarketPulse is still a set of command-line programs. There is no dashboard,
-API, database, automation or AI yet.
+MarketPulse is a set of command-line programs and a local API. There is no
+dashboard, database, automation or AI yet.
 
 ## What Phase 1 does
 
@@ -77,6 +78,34 @@ files yourself:
 
 Always trust the date inside a file, not its name: NSE's file named after a
 holiday or weekend repeats the previous session.
+
+## What Phase 4 adds
+
+`api.py` serves the same data over HTTP. Start it, then open
+http://127.0.0.1:8000/docs to try each endpoint in the browser:
+
+```bat
+.venv\Scripts\python.exe -m uvicorn api:app --reload
+```
+
+| Endpoint | Returns |
+| --- | --- |
+| `GET /health` | Whether the server is running. Contacts no provider |
+| `GET /stocks` | The stocks we follow and their closing times |
+| `GET /stocks/{ticker}/history?period=1mo` | Daily bars. `period` is `1mo` or `1y` |
+| `GET /stocks/{ticker}/metrics` | One year of metrics, from finished sessions only |
+
+| Status | Meaning |
+| --- | --- |
+| 200 | Data follows, with its `source`, `data_type`, `disclaimer` and `notes` |
+| 404 | We do not follow that ticker |
+| 422 | The request is invalid, such as an unsupported `period` |
+| 503 | No provider had usable data. `detail.failures` says why |
+
+Percentages are fractions (0.05 means 5%). A value we cannot calculate is `null`.
+The API listens only on this computer and has no login, so do not expose it to a
+network. Each data request fetches from Yahoo again, because caching arrives in
+Phase 7.
 
 ## Setup (Command Prompt)
 
