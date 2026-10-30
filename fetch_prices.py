@@ -39,7 +39,7 @@ MAX_AGE = timedelta(days=5)
 PRICE_TOLERANCE = 0.01
 
 
-def fetch_history(symbol):
+def fetch_history(symbol, period=PERIOD):
     """Return Yahoo's daily bars for one symbol as a DataFrame.
 
     auto_adjust=False keeps Close as the traded close. With the default (True),
@@ -49,7 +49,7 @@ def fetch_history(symbol):
     A wrong symbol does NOT raise an exception here: yfinance returns an empty
     table, so callers must always validate what they get back.
     """
-    return yf.Ticker(symbol).history(period=PERIOD, interval=INTERVAL, auto_adjust=False)
+    return yf.Ticker(symbol).history(period=period, interval=INTERVAL, auto_adjust=False)
 
 
 def validate_history(history, now):
@@ -91,9 +91,14 @@ def validate_history(history, now):
     return problems
 
 
+def is_bar_in_progress(latest, now):
+    """Return True if the newest bar belongs to a session that has not closed yet."""
+    return latest.date() == now.date() and now.time() < MARKET_CLOSE
+
+
 def describe_latest_bar(latest, now):
     """Say whether the newest bar is final or still changing during today's session."""
-    if latest.date() == now.date() and now.time() < MARKET_CLOSE:
+    if is_bar_in_progress(latest, now):
         return "IN PROGRESS: today's session has not closed, values will change"
     return "complete daily bar"
 
