@@ -5,6 +5,7 @@ runs is checked by starting n8n, which this file does not do.
 """
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -124,6 +125,24 @@ def test_daily_report_sends_the_escaped_text_the_api_returns():
 
     assert report["parameters"]["text"] == "={{ $json.text_html }}"
     assert "text_html" in api.SummaryResponse.model_fields
+
+
+@pytest.mark.parametrize("path", WORKFLOWS, ids=lambda path: path.stem)
+def test_workflows_only_read_settings_that_are_not_secret(path):
+    used = set(re.findall(r"\$env\.(\w+)", path.read_text(encoding="utf-8")))
+
+    assert used <= {"MARKETPULSE_API_URL", "TELEGRAM_CHAT_ID"}
+
+
+def test_launcher_keeps_secrets_away_from_workflows():
+    lines = (WORKFLOW_FOLDER.parent / "start_n8n.bat").read_text(encoding="utf-8").splitlines()
+
+    assert 'set "TELEGRAM_BOT_TOKEN="' in lines
+    assert 'set "GEMINI_API_KEY="' in lines
+    # n8n reads a .env in the folder it starts from, and the secrets are in the root one.
+    assert not (WORKFLOW_FOLDER.parent / ".env").exists()
+    start = next(number for number, line in enumerate(lines) if "n8n.cmd" in line)
+    assert 'pushd "%~dp0"' in lines[:start]
 
 
 def test_daily_report_asks_for_the_ai_note():

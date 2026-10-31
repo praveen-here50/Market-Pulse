@@ -239,7 +239,7 @@ cd ..
 Import the workflow once, then start n8n:
 
 ```bat
-automation\start_n8n.bat import:workflow --input=automation\workflows\marketpulse_summary.json
+automation\start_n8n.bat import:workflow --input=workflows\marketpulse_summary.json
 automation\start_n8n.bat start
 ```
 
@@ -291,21 +291,21 @@ that session's date, so read the date in each line.
 2. Send your new bot any message.
 3. Open this in your browser, with your token, and find `"chat":{"id":123456789`:
    `https://api.telegram.org/bot<TOKEN>/getUpdates`
-4. Save the chat ID, then open a new terminal so it takes effect:
-
-   ```bat
-   setx TELEGRAM_CHAT_ID 123456789
-   ```
-
+4. Save it in `.env` as `TELEGRAM_CHAT_ID=123456789`.
 5. Import the workflow and start n8n:
 
    ```bat
-   automation\start_n8n.bat import:workflow --input=automation\workflows\marketpulse_daily_report.json
+   automation\start_n8n.bat import:workflow --input=workflows\marketpulse_daily_report.json
    automation\start_n8n.bat start
    ```
 
-6. In n8n, open Credentials, create a "Telegram API" credential and paste the token.
-7. Open "MarketPulse daily report". In both Telegram nodes, select your credential.
+6. With the token in `.env` (see Phase 10), load it into n8n's encrypted storage:
+
+   ```bat
+   .venv\Scripts\python.exe automation\import_telegram_credential.py
+   ```
+
+7. Open "MarketPulse daily report" in n8n. The workflow already names that credential.
 8. Start the API, then click Execute Workflow. The report should reach Telegram.
 9. Click Publish, so the schedule runs. For it to fire, the computer must be awake
    with the API and n8n both running.
@@ -342,13 +342,15 @@ financial advice.
 ### Set up your key
 
 1. Create a key at https://aistudio.google.com/apikey. Treat it like a password.
-2. Save it, then open a new terminal so the API can see it:
+2. Put it in a file named `.env` in the main folder, which git ignores:
 
-   ```bat
-   setx GEMINI_API_KEY your-key-here
+   ```text
+   GEMINI_API_KEY=your-key-here
+   TELEGRAM_BOT_TOKEN=your-telegram-token-here
+   TELEGRAM_CHAT_ID=your-chat-id-here
    ```
 
-3. Start the API from that new terminal, and try it:
+3. Start the API, and try it:
 
    ```bat
    .venv\Scripts\python.exe -m uvicorn api:app --reload
@@ -359,7 +361,7 @@ financial advice.
 4. Re-import the workflow so n8n uses the new address:
 
    ```bat
-   automation\start_n8n.bat import:workflow --input=automation\workflows\marketpulse_daily_report.json
+   automation\start_n8n.bat import:workflow --input=workflows\marketpulse_daily_report.json
    ```
 
 The model is `gemini-3.5-flash-lite`. Set `GEMINI_MODEL` to use another.

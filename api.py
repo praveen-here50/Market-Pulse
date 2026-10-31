@@ -27,8 +27,11 @@ import commentary
 import fetch_prices
 import portfolio
 import price_cache
+import settings
 import user_data
 from market_data.service import SplitsUnavailable, fetch_splits, fetch_with_fallback
+
+settings.load_env_file()
 
 DATA_TYPE = "end_of_day"
 DISCLAIMER = (
