@@ -1,0 +1,11 @@
+{
+  "name": "marketpulse-automation",
+  "private": true,
+  "description": "Pins the n8n version MarketPulse runs on. Start it with start_n8n.bat.",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "dependencies": {
+    "n8n": "2.45.7"
+  }
+}

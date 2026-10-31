@@ -1,0 +1,74 @@
+{
+  "id": "mpSummaryPhase08",
+  "name": "MarketPulse summary",
+  "active": false,
+  "nodes": [
+    {
+      "id": "6f0d0f4e-7a1c-4a55-9c55-0a7a6f1f0a01",
+      "name": "Run by hand",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 0],
+      "parameters": {}
+    },
+    {
+      "id": "6f0d0f4e-7a1c-4a55-9c55-0a7a6f1f0a02",
+      "name": "Get summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 0],
+      "parameters": {
+        "url": "={{ $env.MARKETPULSE_API_URL }}/summary",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "id": "6f0d0f4e-7a1c-4a55-9c55-0a7a6f1f0a03",
+      "name": "Keep the report",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [480, 0],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6f0d0f4e-7a1c-4a55-9c55-0a7a6f1f0b01",
+              "name": "text",
+              "value": "={{ $json.text }}",
+              "type": "string"
+            },
+            {
+              "id": "6f0d0f4e-7a1c-4a55-9c55-0a7a6f1f0b02",
+              "name": "complete",
+              "value": "={{ $json.complete }}",
+              "type": "boolean"
+            },
+            {
+              "id": "6f0d0f4e-7a1c-4a55-9c55-0a7a6f1f0b03",
+              "name": "generated_at",
+              "value": "={{ $json.generated_at }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Run by hand": {
+      "main": [[{ "node": "Get summary", "type": "main", "index": 0 }]]
+    },
+    "Get summary": {
+      "main": [[{ "node": "Keep the report", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

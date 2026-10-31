@@ -12,7 +12,7 @@ does not freeze the server.
 """
 
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Literal
 
 import pandas as pd
@@ -55,7 +55,7 @@ PRICE_DIGITS = 2
 FRACTION_DIGITS = 6
 RSI_DIGITS = 1
 
-app = FastAPI(title="MarketPulse API", version="0.7.0", description=DISCLAIMER)
+app = FastAPI(title="MarketPulse API", version="0.8.0", description=DISCLAIMER)
 
 
 @app.exception_handler(user_data.Rejected)
@@ -155,6 +155,26 @@ class MetricsResponse(DataResponse):
     sma_200: float | None
     ema_20: float | None
     rsi_14: float | None
+
+
+class StockSummary(BaseModel):
+    ticker: str
+    source: str | None = None
+    last_bar: date | None = None
+    close: float | None = None
+    change_1d: float | None = None
+    rsi_14: float | None = None
+    notes: list[str] = []
+    problem: str | None = None
+
+
+class SummaryResponse(BaseModel):
+    data_type: str = DATA_TYPE
+    disclaimer: str = DISCLAIMER
+    generated_at: datetime
+    complete: bool
+    stocks: list[StockSummary]
+    text: str
 
 
 def rounded(value, digits):
@@ -311,6 +331,61 @@ def get_metrics(ticker: str) -> MetricsResponse:
         sma_200=rounded(summary["SMA 200"], PRICE_DIGITS),
         ema_20=rounded(summary["EMA 20"], PRICE_DIGITS),
         rsi_14=rounded(summary["RSI 14"], RSI_DIGITS),
+    )
+
+
+def summarize_stock(ticker):
+    """Return one stock's headline numbers. A failure gives a reason, not a guess."""
+    try:
+        metrics = get_metrics(ticker)
+    except HTTPException as error:
+        return StockSummary(ticker=ticker, problem="; ".join(error.detail["failures"]))
+    return StockSummary(
+        ticker=ticker,
+        source=metrics.source,
+        last_bar=metrics.last_bar,
+        close=metrics.close,
+        change_1d=metrics.change_1d,
+        rsi_14=metrics.rsi_14,
+        notes=metrics.notes,
+    )
+
+
+def summary_line(stock):
+    if stock.problem:
+        return f"{stock.ticker}: unavailable ({stock.problem})"
+    change = "n/a" if stock.change_1d is None else f"{stock.change_1d:+.2%}"
+    rsi = "n/a" if stock.rsi_14 is None else f"{stock.rsi_14:.1f}"
+    return f"{stock.ticker}: {stock.close:,.2f} INR on {stock.last_bar}, 1D {change}, RSI {rsi}"
+
+
+def summary_text(stocks, generated_at):
+    """Write the report automations send on, so its wording is tested here."""
+    sources = sorted({stock.source for stock in stocks if stock.source})
+    return "\n".join(
+        [
+            f"MarketPulse summary, {generated_at:%Y-%m-%d %H:%M} IST",
+            *[summary_line(stock) for stock in stocks],
+            f"Source: {', '.join(sources) or 'none available'}",
+            DISCLAIMER,
+        ]
+    )
+
+
+@app.get("/summary")
+def get_summary() -> SummaryResponse:
+    """Return every stock's last finished close, as data and as ready-to-send text.
+
+    One stock failing does not fail the rest, so check `complete` before treating
+    this as the whole watchlist.
+    """
+    now = pd.Timestamp.now(tz=fetch_prices.MARKET_TIMEZONE)
+    stocks = [summarize_stock(ticker) for ticker in user_data.load_watchlist()]
+    return SummaryResponse(
+        generated_at=now,
+        complete=not any(stock.problem for stock in stocks),
+        stocks=stocks,
+        text=summary_text(stocks, now),
     )
 
 

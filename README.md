@@ -15,10 +15,11 @@ here is financial advice.
 | 5 | Streamlit dashboard and interactive charts | Done |
 | 6 | Watchlist and portfolio | Done |
 | 7 | Database and caching | Done |
-| 8 to 12 | Everything else in the project plan | Not started |
+| 8 | n8n installation and integration | Done |
+| 9 to 12 | Everything else in the project plan | Not started |
 
-MarketPulse is a set of command-line programs, a local API, a local dashboard and
-a SQLite database. There is no automation or AI yet.
+MarketPulse is a set of command-line programs, a local API, a local dashboard, a
+SQLite database and a local n8n. Nothing runs on a schedule yet, and there is no AI.
 
 ## What Phase 1 does
 
@@ -201,6 +202,66 @@ To run a test copy without touching your data, set `MARKETPULSE_DATA_FOLDER`:
 set MARKETPULSE_DATA_FOLDER=%TEMP%\marketpulse-test
 .venv\Scripts\python.exe -m uvicorn api:app --port 8010
 ```
+
+## What Phase 8 adds
+
+`GET /summary` returns every stock's last finished close, both as data and as a
+ready-to-send `text`. n8n, a visual automation tool, runs on this computer and calls
+it. The report is written in Python, where tests can check it, so n8n only moves it.
+
+```json
+{
+  "complete": true,
+  "stocks": [{"ticker": "TCS.NS", "close": 2502.6, "problem": null}],
+  "text": "MarketPulse summary, 2026-10-31 09:22 IST\nTCS.NS: 2,502.60 INR on ..."
+}
+```
+
+If one stock fails, the others still arrive, that stock gets a `problem`, and
+`complete` is `false`. Check `complete` before treating a report as the whole
+watchlist.
+
+### Install n8n
+
+Needs Node.js 24 or newer, and about 2.5 GB in `automation\node_modules`, which git
+ignores. Nothing is installed globally. `npm ci` installs the exact versions in
+`package-lock.json`:
+
+```bat
+cd automation
+npm ci
+cd ..
+```
+
+Import the workflow once, then start n8n:
+
+```bat
+automation\start_n8n.bat import:workflow --input=automation\workflows\marketpulse_summary.json
+automation\start_n8n.bat start
+```
+
+1. Start the API in another terminal.
+2. Open http://127.0.0.1:5678 about 20 seconds after n8n says it is ready. A "not
+   found" page before then only means it is still starting.
+3. Create your owner account. It stays on this computer.
+4. Open "MarketPulse summary", click Execute Workflow, and read the last node.
+
+If the API is stopped, the run fails with `ECONNREFUSED`. It does not produce an
+empty report.
+
+### What to know
+
+- n8n listens only on 127.0.0.1. Keep it that way: `start_n8n.bat` is the only
+  supported way to start it, because it also sets that address.
+- n8n's data, including its encryption key and a copy of each run's output, is in
+  `data\n8n`, which git ignores. Back it up if you add credentials in Phase 9.
+- Workflows in `automation\workflows` are public once committed. Never add a real
+  token to one: tokens go in n8n's credentials. `tests\test_workflows.py` checks
+  every export for secrets and for any address other than `MARKETPULSE_API_URL`.
+- MarketPulse never contacts NSE from n8n. See "Using bhavcopy files".
+- `npm audit` reports 173 known issues in packages inside n8n 2.45.7, 6 of them
+  critical. Do not run `npm audit fix --force`: its "fix" is a downgrade to n8n
+  1.17.0. Update by changing the pinned version instead.
 
 ## Setup (Command Prompt)
 
