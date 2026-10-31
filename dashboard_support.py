@@ -15,6 +15,13 @@ import analytics
 API_URL = os.environ.get("MARKETPULSE_API_URL", "http://127.0.0.1:8000")
 REQUEST_TIMEOUT_SECONDS = 60
 MISSING = "n/a"
+ALERT_KINDS = {
+    "close_above": "Close above",
+    "close_below": "Close below",
+    "move_at_least": "1D move of at least (%)",
+    "rsi_above": "RSI 14 above",
+    "rsi_below": "RSI 14 below",
+}
 
 VIEWS = {
     "1 month": pd.DateOffset(months=1),
@@ -251,6 +258,40 @@ def watchlist_table(stocks):
         for stock in stocks
     ]
     return pd.DataFrame(rows).set_index("Stock")
+
+
+def analytics_table(stocks):
+    """Return one row per stock, keeping the API's order of biggest rise first."""
+    above = {True: "Above", False: "Below", None: MISSING}
+    rows = [
+        {
+            "Stock": stock["ticker"],
+            "Last bar": stock["last_bar"],
+            "Close": format_price(stock["close"]),
+            "1D change": format_percent(stock["change_1d"]),
+            "From 52W high": format_percent(stock["distance_from_52w_high"]),
+            "SMA 200": above[stock["above_sma_200"]],
+            "RSI 14": format_rsi(stock["rsi_14"]),
+        }
+        for stock in stocks
+    ]
+    return pd.DataFrame(rows).set_index("Stock")
+
+
+def alert_label(alert):
+    return f"{alert['ticker']}: {ALERT_KINDS[alert['kind']]} {alert['threshold']:,.2f}"
+
+
+def alerts_table(alerts):
+    rows = [
+        {
+            "Alert": alert_label(alert),
+            "Condition now": "Met" if alert["was_met"] else "Not met",
+            "Last session checked": alert["last_checked_bar"] or "Not checked yet",
+        }
+        for alert in alerts
+    ]
+    return pd.DataFrame(rows).set_index("Alert")
 
 
 def trades_table(trades):

@@ -14,6 +14,10 @@ class SplitsUnavailable(Exception):
     """No provider could say which splits happened."""
 
 
+class NewsUnavailable(Exception):
+    """No provider could search for news. This differs from finding no articles."""
+
+
 @dataclass
 class FetchResult:
     history: pd.DataFrame | None
@@ -43,6 +47,18 @@ def fetch_with_fallback(ticker, period, check):
         failures.append(f"{provider.name}: {'; '.join(problems)}")
 
     return FetchResult(None, None, failures)
+
+
+def fetch_news(ticker, limit):
+    """Return (articles, source) from the first provider that can search, or raise."""
+    failures = []
+    for provider in PROVIDERS:
+        if hasattr(provider, "fetch_news"):
+            try:
+                return provider.fetch_news(ticker, limit), provider.name
+            except Exception as error:
+                failures.append(f"{provider.name}: {type(error).__name__}: {error}")
+    raise NewsUnavailable("; ".join(failures) or "no provider has news")
 
 
 def fetch_splits(ticker, since):

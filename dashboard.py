@@ -144,6 +144,87 @@ def show_watchlist(stocks):
             apply_change("DELETE", f"/stocks/{ticker}")
 
 
+def show_market_overview():
+    """Show how the watchlist compares. A stock with no data is named, not left out quietly."""
+    overview = load("/analytics")
+    st.subheader("Market overview")
+    tiles = [
+        ("Rose", overview["advancers"]),
+        ("Fell", overview["decliners"]),
+        ("Unchanged", overview["unchanged"]),
+    ]
+    for column, (label, value) in zip(st.columns(len(tiles)), tiles):
+        column.metric(label, value)
+
+    if overview["stocks"]:
+        table = support.analytics_table(overview["stocks"])
+        st.dataframe(table, height=support.full_table_height(table), width="stretch")
+    for stock in overview["unavailable"]:
+        st.warning(f"No data for {stock['ticker']}, so it is not counted above.")
+        st.caption(stock["problem"])
+
+
+def show_news(tickers):
+    """Show headlines for one stock. Finding none and failing to look are told apart."""
+    st.subheader("News")
+    ticker = st.selectbox("Stock for news", tickers)
+    try:
+        news = load(f"/stocks/{ticker}/news")
+    except support.DataUnavailable as error:
+        st.warning(f"News could not be loaded for {ticker}.")
+        for failure in error.failures:
+            st.caption(failure)
+        return
+
+    st.caption(f"Source: {news['source']}. {news['disclaimer']}")
+    if not news["articles"]:
+        st.write("No recent headlines name this company. That does not mean nothing happened.")
+    for article in news["articles"]:
+        date_text = (article["published_at"] or "")[:10]
+        st.link_button(article["title"], article["link"], width="stretch")
+        st.caption(" | ".join(part for part in (article["publisher"], date_text) if part))
+
+
+def show_alerts(tickers):
+    """Show the alerts, with forms to add and delete them."""
+    st.subheader("Alerts")
+    st.caption(
+        "Levels you choose, checked once after the close and sent to Telegram when "
+        "n8n is running. An alert is not a signal or financial advice."
+    )
+    alerts = support.fetch_json("/alerts")
+    if alerts:
+        st.dataframe(support.alerts_table(alerts), width="stretch")
+
+    with st.form("add_alert", clear_on_submit=True):
+        ticker_column, kind_column, level_column = st.columns(3)
+        ticker = ticker_column.selectbox("Stock for alert", tickers)
+        kind = kind_column.selectbox(
+            "Condition", list(support.ALERT_KINDS), format_func=support.ALERT_KINDS.get
+        )
+        level = level_column.number_input("Level", min_value=0.01, format="%.2f")
+        if st.form_submit_button("Add alert"):
+            apply_change("POST", "/alerts", {"ticker": ticker, "kind": kind, "threshold": level})
+
+    if alerts:
+        with st.form("delete_alert"):
+            labels = {support.alert_label(alert): alert["id"] for alert in alerts}
+            label = st.selectbox("Alert to delete", list(labels))
+            if st.form_submit_button("Delete alert"):
+                apply_change("DELETE", f"/alerts/{labels[label]}")
+
+
+def show_insights(tickers):
+    try:
+        show_market_overview()
+    except support.DataUnavailable as error:
+        st.warning("The market overview is unavailable right now.")
+        for failure in error.failures:
+            st.caption(failure)
+    show_news(tickers)
+    show_alerts(tickers)
+
+
 def show_portfolio_summary(portfolio):
     """Show the totals and holdings. Any unknown value is called out, not summed around."""
     tiles = [
@@ -221,7 +302,9 @@ def main():
     try:
         stocks = support.fetch_json("/stocks")
         tickers = [stock["ticker"] for stock in stocks]
-        market_tab, watchlist_tab, portfolio_tab = st.tabs(["Market", "Watchlist", "Portfolio"])
+        market_tab, insights_tab, watchlist_tab, portfolio_tab = st.tabs(
+            ["Market", "Insights", "Watchlist", "Portfolio"]
+        )
 
         with market_tab:
             stock_column, view_column = st.columns([2, 3])
@@ -231,6 +314,9 @@ def main():
             theme = st.context.theme.type or "light"
             show_stock(ticker, view, theme)
             show_comparison(stocks)
+
+        with insights_tab:
+            show_insights(tickers)
 
         with watchlist_tab:
             show_watchlist(stocks)

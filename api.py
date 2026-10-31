@@ -21,6 +21,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+import alerts
 import analytics
 import analyze_prices
 import commentary
@@ -29,7 +30,13 @@ import portfolio
 import price_cache
 import settings
 import user_data
-from market_data.service import SplitsUnavailable, fetch_splits, fetch_with_fallback
+from market_data.service import (
+    NewsUnavailable,
+    SplitsUnavailable,
+    fetch_news,
+    fetch_splits,
+    fetch_with_fallback,
+)
 
 settings.load_env_file()
 
@@ -43,6 +50,18 @@ PORTFOLIO_DISCLAIMER = (
     "Valued at the last finished session's close, not a live price. Leaves out "
     "brokerage, taxes and dividends, so these are not your real returns or tax figures."
 )
+
+NEWS_DISCLAIMER = (
+    "Headlines from other publishers, not checked by MarketPulse. Some may be late or "
+    "off-topic, and the list is not complete. Not financial advice."
+)
+
+ALERT_DISCLAIMER = (
+    "Levels you chose, checked on the last finished session's close, not live prices. "
+    "An alert is not a signal or financial advice."
+)
+
+NEWS_LIMIT = 5
 
 # NSE tickers are letters and digits, and a few also contain & or -, like M&M.NS.
 TICKER_PATTERN = r"^[A-Z0-9&-]+\.NS$"
@@ -63,7 +82,7 @@ PRICE_DIGITS = 2
 FRACTION_DIGITS = 6
 RSI_DIGITS = 1
 
-app = FastAPI(title="MarketPulse API", version="0.10.0", description=DISCLAIMER)
+app = FastAPI(title="MarketPulse API", version="0.11.0", description=DISCLAIMER)
 
 
 @app.exception_handler(user_data.Rejected)
@@ -95,6 +114,69 @@ class NewTrade(BaseModel):
 
 class Trade(NewTrade):
     id: str
+
+
+class NewAlert(BaseModel):
+    ticker: str
+    kind: Literal["close_above", "close_below", "move_at_least", "rsi_above", "rsi_below"]
+    threshold: float = Field(gt=0)
+
+
+class Alert(NewAlert):
+    id: str
+    was_met: bool
+    last_checked_bar: date | None
+
+
+class AlertCheckResponse(BaseModel):
+    data_type: str = DATA_TYPE
+    disclaimer: str = ALERT_DISCLAIMER
+    checked_at: datetime
+    fired: list[str]
+    problems: list[str]
+    should_send: bool
+    text: str
+    text_html: str
+
+
+class Article(BaseModel):
+    title: str
+    publisher: str | None
+    published_at: datetime | None
+    link: str
+
+
+class NewsResponse(BaseModel):
+    ticker: str
+    source: str
+    disclaimer: str = NEWS_DISCLAIMER
+    articles: list[Article]
+
+
+class StockAnalytics(BaseModel):
+    ticker: str
+    last_bar: date
+    close: float
+    change_1d: float | None
+    distance_from_52w_high: float | None
+    above_sma_200: bool | None
+    rsi_14: float | None
+
+
+class UnavailableStock(BaseModel):
+    ticker: str
+    problem: str
+
+
+class AnalyticsResponse(BaseModel):
+    data_type: str = DATA_TYPE
+    disclaimer: str = DISCLAIMER
+    complete: bool
+    advancers: int
+    decliners: int
+    unchanged: int
+    stocks: list[StockAnalytics]
+    unavailable: list[UnavailableStock]
 
 
 class Holding(BaseModel):
@@ -573,4 +655,117 @@ def get_portfolio() -> PortfolioResponse:
         total_market_value=total(holdings, "market_value"),
         total_unrealised=total(holdings, "unrealised"),
         total_realised=total(holdings, "realised"),
+    )
+
+
+def analyze_stock(metrics):
+    above = None if metrics.sma_200 is None else metrics.close > metrics.sma_200
+    return StockAnalytics(
+        ticker=metrics.ticker,
+        last_bar=metrics.last_bar,
+        close=metrics.close,
+        change_1d=metrics.change_1d,
+        distance_from_52w_high=rounded(
+            analytics.distance_from_high(metrics.close, metrics.high_52w), FRACTION_DIGITS
+        ),
+        above_sma_200=above,
+        rsi_14=metrics.rsi_14,
+    )
+
+
+@app.get("/analytics")
+def get_analytics() -> AnalyticsResponse:
+    """Compare the watchlist on its last finished sessions, biggest rise first."""
+    stocks, unavailable = [], []
+    for ticker in user_data.load_watchlist():
+        try:
+            stocks.append(analyze_stock(get_metrics(ticker)))
+        except HTTPException as error:
+            problem = "; ".join(error.detail["failures"])
+            unavailable.append(UnavailableStock(ticker=ticker, problem=problem))
+
+    stocks.sort(key=lambda stock: (stock.change_1d is None, -(stock.change_1d or 0)))
+    return AnalyticsResponse(
+        complete=not unavailable,
+        stocks=stocks,
+        unavailable=unavailable,
+        **analytics.count_moves([stock.change_1d for stock in stocks]),
+    )
+
+
+@app.get("/stocks/{ticker}/news")
+def get_news(ticker: str) -> NewsResponse:
+    """Return recent headlines that name the company. These are never sent to Gemini."""
+    require_known_ticker(ticker)
+    try:
+        articles, source = fetch_news(ticker, NEWS_LIMIT)
+    except NewsUnavailable as error:
+        raise data_unavailable(ticker, [str(error)]) from error
+    return NewsResponse(ticker=ticker, source=source, articles=articles)
+
+
+@app.get("/alerts")
+def list_alerts() -> list[Alert]:
+    """List every alert, oldest first."""
+    return alerts.load_alerts()
+
+
+@app.post("/alerts", status_code=201)
+def add_alert(alert: NewAlert) -> Alert:
+    """Add an alert for a stock on the watchlist."""
+    require_known_ticker(alert.ticker)
+    if alert.kind.startswith("rsi") and alert.threshold >= 100:
+        raise HTTPException(status_code=422, detail="RSI is always below 100")
+    return alerts.add_alert(alert.ticker, alert.kind, alert.threshold)
+
+
+@app.delete("/alerts/{alert_id}", status_code=204)
+def delete_alert(alert_id: str):
+    """Delete an alert."""
+    if not alerts.delete_alert(alert_id):
+        raise HTTPException(status_code=404, detail=f"Unknown alert: {alert_id}")
+
+
+def alert_text(fired, problems, checked_at):
+    lines = [f"MarketPulse alerts, {checked_at:%Y-%m-%d %H:%M} IST", *fired]
+    lines += [f"Could not check {problem}" for problem in problems]
+    return "\n".join([*lines, ALERT_DISCLAIMER])
+
+
+@app.post("/alerts/check")
+def check_alerts() -> AlertCheckResponse:
+    """Compare every alert with its stock's last finished session.
+
+    An alert fires once when its condition becomes true. Checking the same session
+    again changes nothing, so a retry cannot repeat a message.
+    """
+    now = pd.Timestamp.now(tz=fetch_prices.MARKET_TIMEZONE)
+    by_ticker = defaultdict(list)
+    for alert in alerts.load_alerts():
+        by_ticker[alert["ticker"]].append(alert)
+
+    fired, problems = [], []
+    for ticker, group in by_ticker.items():
+        try:
+            metrics = get_metrics(ticker)
+        except HTTPException as error:
+            problems.append(f"{ticker}: {'; '.join(error.detail['failures'])}")
+            continue
+
+        last_bar = metrics.last_bar.isoformat()
+        for alert in group:
+            met = alerts.is_met(alert, metrics)
+            if met is None:
+                problems.append(f"{ticker}: its value for {alert['kind']} is unknown")
+            elif alerts.record_check(alert, last_bar, met):
+                fired.append(alerts.describe(alert, metrics))
+
+    text = alert_text(fired, problems, now)
+    return AlertCheckResponse(
+        checked_at=now,
+        fired=fired,
+        problems=problems,
+        should_send=bool(fired or problems),
+        text=text,
+        text_html=html.escape(text, quote=False),
     )

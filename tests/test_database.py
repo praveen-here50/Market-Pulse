@@ -173,8 +173,55 @@ def test_database_from_a_newer_version_is_refused(private_user_data):
     with closing(sqlite3.connect(private_user_data / database.DATABASE_FILE)) as connection:
         connection.execute(f"PRAGMA user_version = {database.SCHEMA_VERSION + 1}")
 
-    with pytest.raises(RuntimeError, match="expects 1"):
+    with pytest.raises(RuntimeError, match=f"expects {database.SCHEMA_VERSION}"):
         user_data.load_trades()
+
+
+def make_version_1_database(folder):
+    """Build a Phase 7 database with synthetic rows, as an older copy would have left it."""
+    folder.mkdir()
+    with closing(sqlite3.connect(folder / database.DATABASE_FILE)) as connection:
+        connection.executescript(database.SCHEMA)
+        connection.execute("INSERT INTO watchlist (ticker, is_fno) VALUES ('TCS.NS', 1)")
+        connection.execute(
+            "INSERT INTO trades (id, ticker, side, quantity, price, trade_date) "
+            "VALUES ('old', 'TCS.NS', 'buy', 7, 1204.3, '2026-03-02')"
+        )
+        connection.execute("PRAGMA user_version = 1")
+        connection.commit()
+
+
+def test_upgrading_keeps_every_trade_and_adds_alerts(private_user_data):
+    make_version_1_database(private_user_data)
+
+    trades = user_data.load_trades()
+
+    assert [(trade["id"], trade["quantity"], trade["price"]) for trade in trades] == [
+        ("old", 7, 1204.3)
+    ]
+    assert list(user_data.load_watchlist()) == ["TCS.NS"]
+    with closing(database.connect()) as connection:
+        assert database.schema_version(connection) == database.SCHEMA_VERSION
+        assert connection.execute("SELECT COUNT(*) FROM alerts").fetchone()[0] == 0
+
+
+def test_upgrading_does_not_read_the_old_json_files_again(private_user_data):
+    make_version_1_database(private_user_data)
+    write_files(private_user_data)
+
+    assert [trade["id"] for trade in user_data.load_trades()] == ["old"]
+
+
+def test_a_failed_upgrade_leaves_the_old_database_working(private_user_data, monkeypatch):
+    make_version_1_database(private_user_data)
+    monkeypatch.setattr(database, "VERSION_2", "CREATE TABLE nope (; bad sql")
+
+    with pytest.raises(sqlite3.OperationalError):
+        user_data.load_trades()
+
+    monkeypatch.undo()
+    monkeypatch.setattr(database, "DATA_FOLDER", private_user_data)
+    assert [trade["id"] for trade in user_data.load_trades()] == ["old"]
 
 
 def test_a_failed_transaction_saves_nothing():

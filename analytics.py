@@ -139,3 +139,20 @@ def summarize(history):
     summary[f"EMA {EMA_SPAN}"] = ema(close, EMA_SPAN).iloc[-1]
     summary[f"RSI {RSI_WINDOW}"] = rsi(close).iloc[-1]
     return summary
+
+
+def distance_from_high(close, high):
+    """Return how far a close is below a high, as a negative fraction, or None if unknown."""
+    if close is None or high is None:
+        return None
+    return close / high - 1
+
+
+def count_moves(changes):
+    """Count rises, falls and flat days. An unknown change is in none of them."""
+    known = [change for change in changes if change is not None]
+    return {
+        "advancers": sum(change > 0 for change in known),
+        "decliners": sum(change < 0 for change in known),
+        "unchanged": sum(change == 0 for change in known),
+    }

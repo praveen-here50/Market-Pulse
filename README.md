@@ -16,9 +16,10 @@ here is financial advice.
 | 6 | Watchlist and portfolio | Done |
 | 7 | Database and caching | Done |
 | 8 | n8n installation and integration | Done |
-| 9 | Telegram automation and scheduled reports | Done, needs your bot |
-| 10 | Gemini AI integration | Done, needs your key |
-| 11 and 12 | Everything else in the project plan | Not started |
+| 9 | Telegram automation and scheduled reports | Done |
+| 10 | Gemini AI integration | Done |
+| 11 | Market analytics, news and alerts | Done |
+| 12 | Testing, optimization and deployment | Not started |
 
 MarketPulse is a set of command-line programs, a local API, a local dashboard, a
 SQLite database, and a local n8n that can send a daily Telegram report with a short
@@ -365,6 +366,50 @@ financial advice.
    ```
 
 The model is `gemini-3.5-flash-lite`. Set `GEMINI_MODEL` to use another.
+
+## What Phase 11 adds
+
+The dashboard has an Insights tab, backed by these endpoints:
+
+| Endpoint | Does |
+| --- | --- |
+| `GET /analytics` | Counts rises and falls, and ranks the watchlist by 1D change |
+| `GET /stocks/{ticker}/news` | Up to 5 recent headlines that name the company |
+| `GET /alerts`, `POST /alerts` | Lists or adds alerts |
+| `DELETE /alerts/{id}` | Deletes an alert |
+| `POST /alerts/check` | Compares alerts with the last finished session |
+
+### Alerts
+
+Add an alert in the Insights tab: a close above or below a level, a 1D move of at least
+a percentage in either direction, or RSI 14 above or below a level. The "MarketPulse
+alerts" workflow checks them at 16:40 IST on weekdays and sends anything new to Telegram.
+
+- These are levels you choose, not signals, and nothing here is financial advice.
+- An alert fires when its condition becomes true. It stays quiet while the condition
+  stays true, and can fire again only after the condition has cleared.
+- A new alert whose condition is already true fires on the next check.
+- If nothing happened, no message is sent, so silence means no alert fired.
+- A stock that could not be checked is reported, and its alerts stay ready.
+- A stock with alerts cannot be removed until they are deleted.
+- If Telegram fails after a check, that alert is not sent again. See n8n's Executions.
+
+To add the workflow to n8n after a fresh install, stop n8n and run:
+
+```bat
+automation\start_n8n.bat import:workflow --input=workflows\marketpulse_alerts.json
+automation\start_n8n.bat publish:workflow --id=mpAlertsPhase011
+```
+
+### News
+
+Headlines come from Yahoo's search and are only shown in the dashboard. They are never
+sent to Gemini, because a crafted headline could carry instructions for it.
+
+Coverage is thin. On 31 Oct 2026, Infosys had 5 headlines, M&M had 3 and TCS and IRCTC
+had none. No headlines does not mean nothing happened. Yahoo's ticker tags are unreliable,
+so a headline must name the company, and related companies can still slip through: M&M's
+list included Tech Mahindra.
 
 ## Setup (Command Prompt)
 

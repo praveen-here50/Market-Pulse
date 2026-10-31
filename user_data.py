@@ -48,6 +48,9 @@ def remove_stock(ticker):
         found = connection.execute("SELECT 1 FROM trades WHERE ticker = ?", (ticker,))
         if found.fetchone():
             raise Rejected(f"{ticker} has trades. Delete them before removing it")
+        found = connection.execute("SELECT 1 FROM alerts WHERE ticker = ?", (ticker,))
+        if found.fetchone():
+            raise Rejected(f"{ticker} has alerts. Delete them before removing it")
         connection.execute("DELETE FROM watchlist WHERE ticker = ?", (ticker,))
 
 

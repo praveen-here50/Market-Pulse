@@ -28,7 +28,7 @@ TRADES_FILE = "trades.json"
 BUSY_SECONDS = 10
 
 # Stored inside the file as `user_version`. 0 means the tables do not exist yet.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # STRICT makes SQLite refuse a value of the wrong type instead of storing it anyway.
 # `position` keeps rows in the order they were entered, which decides how trades on
@@ -74,6 +74,23 @@ CREATE TABLE price_bars (
 """
 
 
+# Added in Phase 11. `was_met` remembers the last result, so an alert fires when its
+# condition becomes true, not on every day it stays true.
+VERSION_2 = """
+CREATE TABLE alerts (
+    position INTEGER PRIMARY KEY,
+    id TEXT NOT NULL UNIQUE,
+    ticker TEXT NOT NULL REFERENCES watchlist (ticker),
+    kind TEXT NOT NULL CHECK (
+        kind IN ('close_above', 'close_below', 'move_at_least', 'rsi_above', 'rsi_below')
+    ),
+    threshold REAL NOT NULL CHECK (threshold > 0),
+    was_met INTEGER NOT NULL DEFAULT 0 CHECK (was_met IN (0, 1)),
+    last_checked_bar TEXT
+) STRICT;
+"""
+
+
 def default_watchlist():
     return [
         {"ticker": ticker, "is_fno": instrument.is_fno}
@@ -114,19 +131,25 @@ def schema_version(connection):
 
 
 def prepare(connection):
-    """Create the tables on first use. A failure leaves them uncreated, so it can retry."""
+    """Create or upgrade the tables. A failure changes nothing, so it can retry.
+
+    Each step moves one version up and keeps every existing row, so a database from
+    any earlier version arrives here. The file holds real trades: never recreate it.
+    """
     if schema_version(connection) == SCHEMA_VERSION:
         return
 
     connection.execute("BEGIN IMMEDIATE")
     # Another thread may have finished this while we waited for the write lock.
     version = schema_version(connection)
-    if version == 0:
+    if version > SCHEMA_VERSION:
+        raise RuntimeError(f"Database is version {version}, this code expects {SCHEMA_VERSION}")
+    if version < 1:
         connection.executescript(SCHEMA)
         import_json_files(connection)
-        connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-    elif version != SCHEMA_VERSION:
-        raise RuntimeError(f"Database is version {version}, this code expects {SCHEMA_VERSION}")
+    if version < 2:
+        connection.executescript(VERSION_2)
+    connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     connection.execute("COMMIT")
 
 

@@ -145,6 +145,34 @@ def test_launcher_keeps_secrets_away_from_workflows():
     assert 'pushd "%~dp0"' in lines[:start]
 
 
+def test_alerts_run_after_the_close_and_after_the_daily_report():
+    workflow = load("marketpulse_alerts.json")
+    schedule = next(node for node in workflow["nodes"] if node["type"].endswith(".scheduleTrigger"))
+
+    assert schedule["parameters"]["rule"]["interval"][0]["expression"] == "40 16 * * 1-5"
+    assert workflow["settings"]["timezone"] == "Asia/Kolkata"
+
+
+def test_alerts_only_send_when_there_is_something_to_say():
+    workflow = load("marketpulse_alerts.json")
+    decision = next(node for node in workflow["nodes"] if node["name"] == "Anything to send?")
+
+    condition = decision["parameters"]["conditions"]["conditions"][0]
+    assert condition["leftValue"] == "={{ $json.should_send }}"
+    assert "should_send" in api.AlertCheckResponse.model_fields
+    assert workflow["connections"]["Anything to send?"]["main"] == [
+        [{"node": "Send alerts", "type": "main", "index": 0}],
+        [],
+    ]
+
+
+def test_alerts_report_a_failed_check():
+    workflow = load("marketpulse_alerts.json")
+    failure = workflow["connections"]["Check alerts"]["main"][1]
+
+    assert failure[0]["node"] == "Send failure alert"
+
+
 def test_daily_report_asks_for_the_ai_note():
     workflow = load("marketpulse_daily_report.json")
     summary = next(node for node in workflow["nodes"] if node["name"] == "Get summary")

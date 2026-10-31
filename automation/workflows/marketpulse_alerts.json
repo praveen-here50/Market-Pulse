@@ -1,0 +1,152 @@
+{
+  "id": "mpAlertsPhase011",
+  "name": "MarketPulse alerts",
+  "active": false,
+  "nodes": [
+    {
+      "id": "8b2f3c4d-5e6f-4a71-9b82-1c2d3e4f0a01",
+      "name": "Weekdays at 16:40 IST",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "40 16 * * 1-5"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "8b2f3c4d-5e6f-4a71-9b82-1c2d3e4f0a02",
+      "name": "Run by hand",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 200],
+      "parameters": {}
+    },
+    {
+      "id": "8b2f3c4d-5e6f-4a71-9b82-1c2d3e4f0a03",
+      "name": "Check alerts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 100],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MARKETPULSE_API_URL }}/alerts/check",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "id": "8b2f3c4d-5e6f-4a71-9b82-1c2d3e4f0a04",
+      "name": "Anything to send?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [480, 0],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8b2f3c4d-5e6f-4a71-9b82-1c2d3e4f0b01",
+              "leftValue": "={{ $json.should_send }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "8b2f3c4d-5e6f-4a71-9b82-1c2d3e4f0a05",
+      "name": "Send alerts",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [720, 0],
+      "credentials": {
+        "telegramApi": {
+          "id": "marketpulseTelegram",
+          "name": "MarketPulse Telegram"
+        }
+      },
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.text_html }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      }
+    },
+    {
+      "id": "8b2f3c4d-5e6f-4a71-9b82-1c2d3e4f0a06",
+      "name": "Send failure alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [480, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "marketpulseTelegram",
+          "name": "MarketPulse Telegram"
+        }
+      },
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "MarketPulse alerts were not checked: the API did not answer after 3 tries. Check that the API is running.",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Weekdays at 16:40 IST": {
+      "main": [[{ "node": "Check alerts", "type": "main", "index": 0 }]]
+    },
+    "Run by hand": {
+      "main": [[{ "node": "Check alerts", "type": "main", "index": 0 }]]
+    },
+    "Check alerts": {
+      "main": [
+        [{ "node": "Anything to send?", "type": "main", "index": 0 }],
+        [{ "node": "Send failure alert", "type": "main", "index": 0 }]
+      ]
+    },
+    "Anything to send?": {
+      "main": [
+        [{ "node": "Send alerts", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata"
+  },
+  "pinData": {}
+}

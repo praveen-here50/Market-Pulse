@@ -101,7 +101,57 @@ TRADE = {
 }
 
 
-def serve(monkeypatch, *, stocks=STOCKS, history=None, metrics=None, portfolio=None, trades=()):
+OVERVIEW = {
+    "advancers": 1,
+    "decliners": 0,
+    "unchanged": 0,
+    "stocks": [
+        {
+            "ticker": "TCS.NS",
+            "last_bar": "2026-10-30",
+            "close": 100.0,
+            "change_1d": 0.01,
+            "distance_from_52w_high": -0.05,
+            "above_sma_200": None,
+            "rsi_14": 55.0,
+        }
+    ],
+    "unavailable": [{"ticker": "INFY.NS", "problem": "simulated outage"}],
+}
+NEWS = {
+    "source": "Fake provider",
+    "disclaimer": "Not checked.",
+    "articles": [
+        {
+            "title": "SYNTHETIC headline",
+            "publisher": "Test Wire",
+            "published_at": "2026-10-30T10:00:00Z",
+            "link": "https://example.com/a",
+        }
+    ],
+}
+ALERT = {
+    "id": "a1",
+    "ticker": "TCS.NS",
+    "kind": "close_above",
+    "threshold": 2500.0,
+    "was_met": True,
+    "last_checked_bar": "2026-10-30",
+}
+
+
+def serve(
+    monkeypatch,
+    *,
+    stocks=STOCKS,
+    history=None,
+    metrics=None,
+    portfolio=None,
+    trades=(),
+    overview=OVERVIEW,
+    news=NEWS,
+    alerts=(),
+):
     """Replace the API. An exception given for a value is raised instead of returned."""
 
     def answer(value):
@@ -116,6 +166,12 @@ def serve(monkeypatch, *, stocks=STOCKS, history=None, metrics=None, portfolio=N
             return answer(EMPTY_PORTFOLIO if portfolio is None else portfolio)
         if path == "/trades":
             return list(trades)
+        if path == "/analytics":
+            return answer(overview)
+        if path == "/alerts":
+            return list(alerts)
+        if path.endswith("/news"):
+            return answer(news)
         if path.endswith("/metrics"):
             return answer(make_metrics() if metrics is None else metrics)
         return answer(make_history() if history is None else history)
@@ -201,7 +257,8 @@ def test_api_stopping_after_the_first_call_is_also_explained(monkeypatch):
 
 
 def test_missing_prices_are_explained_without_any_tiles(monkeypatch):
-    serve(monkeypatch, history=support.DataUnavailable(["Yahoo: down"]), metrics=support.DataUnavailable(["Yahoo: down"]))
+    down = support.DataUnavailable(["Yahoo: down"])
+    serve(monkeypatch, history=down, metrics=down, overview=down)
 
     page = run_page()
 
@@ -214,7 +271,8 @@ def test_missing_prices_are_explained_without_any_tiles(monkeypatch):
 def test_fallback_prices_still_show_when_metrics_are_refused(monkeypatch):
     # This is the real outage case: bhavcopy has prices but no Adj Close.
     history = make_history(notes=["fallback used because Yahoo: down"])
-    serve(monkeypatch, history=history, metrics=support.DataUnavailable(["no Adj Close"]))
+    refused = support.DataUnavailable(["no Adj Close"])
+    serve(monkeypatch, history=history, metrics=refused, overview=refused)
 
     page = run_page()
 
@@ -384,3 +442,70 @@ def test_removing_a_stock_sends_it_to_the_api(monkeypatch):
     button(page, "Remove from watchlist").click().run()
 
     assert sent == [("DELETE", "/stocks/TCS.NS", None)]
+
+
+def page_text(page):
+    return " ".join(
+        [*(item.value for item in page.caption), *(item.value for item in page.warning)]
+    )
+
+
+def test_insights_shows_the_overview_and_names_a_missing_stock(monkeypatch):
+    serve(monkeypatch)
+
+    page = run_page()
+
+    assert not page.exception
+    assert {metric.label: metric.value for metric in page.metric}["Rose"] == "1"
+    assert "No data for INFY.NS, so it is not counted above." in page_text(page)
+
+
+def test_news_disclaimer_is_shown(monkeypatch):
+    serve(monkeypatch)
+
+    assert "Source: Fake provider. Not checked." in page_text(run_page())
+
+
+def test_no_news_is_not_shown_as_a_failure(monkeypatch):
+    serve(monkeypatch, news={**NEWS, "articles": []})
+
+    page = run_page()
+
+    assert not page.exception
+    assert any("does not mean nothing happened" in item.value for item in page.markdown)
+
+
+def test_failed_news_is_told_apart_from_no_news(monkeypatch):
+    serve(monkeypatch, news=support.DataUnavailable(["simulated outage"]))
+
+    assert "News could not be loaded" in page_text(run_page())
+
+
+def test_a_failed_overview_leaves_the_rest_of_the_page_working(monkeypatch):
+    serve(monkeypatch, overview=support.DataUnavailable(["simulated outage"]))
+
+    page = run_page()
+
+    assert not page.exception
+    assert "The market overview is unavailable right now." in page_text(page)
+    assert "Source: Fake provider. Not checked." in page_text(page)
+
+
+def test_saved_alerts_are_listed_and_can_be_deleted(monkeypatch):
+    serve(monkeypatch, alerts=[ALERT])
+
+    page = run_page()
+
+    assert not page.exception
+    assert "Alert to delete" in [box.label for box in page.selectbox]
+
+
+def test_alert_label_reads_clearly():
+    assert support.alert_label(ALERT) == "TCS.NS: Close above 2,500.00"
+
+
+def test_analytics_table_shows_unknown_values_as_na():
+    table = support.analytics_table(OVERVIEW["stocks"])
+
+    assert table.loc["TCS.NS", "SMA 200"] == "n/a"
+    assert table.loc["TCS.NS", "From 52W high"] == "-5.00%"
