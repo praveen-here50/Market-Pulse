@@ -1,13 +1,84 @@
 # MarketPulse
 
-An Indian stock market intelligence platform, built phase by phase as a
-learning and portfolio project. For educational and personal use only. Nothing
-here is financial advice. It is not affiliated with Yahoo, NSE, Google or Telegram.
+[![Tests](https://github.com/praveen-here50/Market-Pulse/actions/workflows/tests.yml/badge.svg)](https://github.com/praveen-here50/Market-Pulse/actions/workflows/tests.yml)
+![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-## Try the demo
+A personal Indian stock market tracker in Python. It turns end-of-day prices into a
+dashboard, a trade-based portfolio, and automated Telegram reports and alerts, with a
+short AI note that is checked before it is sent.
 
-The demo is the real dashboard running on made-up prices. It needs no keys or accounts,
-contacts no provider and holds no real data:
+It is a learning project that runs on one computer. It does not trade, it shows delayed
+daily data rather than live prices, and nothing here is financial advice. It is not
+affiliated with Yahoo, NSE, Google, Telegram or n8n.
+
+## What it does
+
+- **Market data:** fetches and validates daily NSE prices, with a fallback provider, and
+  names the source of every number.
+- **Analytics:** returns, volatility, drawdown, moving averages, RSI and market breadth,
+  calculated with pandas and tested against known values.
+- **Portfolio:** replays your trades with the average cost method and adjusts for splits,
+  so holdings are always recalculated rather than stored.
+- **Automation:** n8n sends a daily report and level-based alerts to Telegram after the
+  market closes. Each alert fires once, and a retry cannot repeat it.
+- **Checked AI notes:** Gemini writes a short summary, and Python drops it if it contains
+  an invented number, a reversed change, advice or a prediction.
+
+## Screenshots
+
+These show the built-in demo. Every company, price and headline is made up.
+
+![Market page with price chart and indicators](docs/screenshots/market.png)
+
+![Insights page with market overview, news and alerts](docs/screenshots/insights.png)
+
+![Portfolio page with holdings and trades](docs/screenshots/portfolio.png)
+
+![Automation page with the daily report and alert text](docs/screenshots/automation.png)
+
+## Tech stack
+
+| Area | Tools |
+| --- | --- |
+| Language | Python 3.12 |
+| Data and analytics | pandas, yfinance |
+| Backend | FastAPI, Pydantic, Uvicorn |
+| Dashboard | Streamlit, Plotly |
+| Storage | SQLite, with versioned schema upgrades |
+| Automation | n8n, Telegram Bot API |
+| AI | Gemini API |
+| Testing | pytest, GitHub Actions |
+
+## How it works
+
+```text
+Yahoo Finance --> FastAPI + pandas --> SQLite (trades, alerts, 15-minute price cache)
+                   |            ^
+                   v            |
+             Streamlit         n8n --> Telegram (16:30 report, 16:40 alerts)
+             dashboard
+                                Gemini note, checked in Python before sending
+```
+
+## Engineering highlights
+
+- **Data honesty:** an unfinished session is never reported as a close, a value that
+  cannot be calculated is `null`, and a partial report says it is incomplete.
+- **Careful caching:** a saved price is dropped once the session closes, and is skipped
+  after a split, because mixing the two would misstate a holding.
+- **AI output treated as untrusted:** every number, date and sign must match the data
+  sent to the model, and third-party headlines are never sent to it.
+- **Safe data changes:** saves are transactions, and database upgrades keep every row.
+- **Private by default:** every service listens only on `127.0.0.1`, and secrets stay
+  out of the code and workflow files, which tests check.
+- **Testing:** 533 automated tests that need no network, plus deliberately breaking each
+  safety rule to confirm a test fails.
+
+## Try it
+
+This runs the real dashboard on made-up prices. It needs no keys or accounts, contacts no
+provider and holds no real data:
 
 ```bat
 py -3.12 -m venv .venv
@@ -15,30 +86,32 @@ py -3.12 -m venv .venv
 run_demo.bat
 ```
 
-It opens at http://127.0.0.1:8502. Every stock is an invented `DEMO-` company, and real
-tickers are refused. What you change is lost when it restarts. The Automation tab shows
-the Telegram report and alerts as text, because the demo sends nothing.
+It opens at http://127.0.0.1:8502. In PowerShell, use `.\run_demo.bat`. Real tickers are
+refused, and what you change is lost when it restarts.
 
-## Status
+To run the tests:
 
-| Phase | Scope | State |
-| --- | --- | --- |
-| 1 | Environment and first market data retrieval | Done |
-| 2 | Pandas, financial calculations and data processing | Done |
-| 3 | Multi-provider market-data architecture | Done |
-| 4 | FastAPI backend and API endpoints | Done |
-| 5 | Streamlit dashboard and interactive charts | Done |
-| 6 | Watchlist and portfolio | Done |
-| 7 | Database and caching | Done |
-| 8 | n8n installation and integration | Done |
-| 9 | Telegram automation and scheduled reports | Done |
-| 10 | Gemini AI integration | Done |
-| 11 | Market analytics, news and alerts | Done |
-| 12 | Testing, optimization and deployment | Done |
+```bat
+.venv\Scripts\python.exe -m pytest
+```
 
-MarketPulse is a set of command-line programs, a local API, a local dashboard, a
-SQLite database, and a local n8n that can send a daily Telegram report with a short
-checked note from Gemini.
+## Known limits
+
+- It runs locally and has no login, so it must not be exposed to a network.
+- Real prices come from Yahoo through `yfinance`, an unofficial library. That is for
+  personal use only, which is why the code ships with no market data.
+- News coverage from Yahoo is thin for NSE stocks.
+- Scheduled reports need the computer awake, and a missed report is not sent later.
+- Results leave out brokerage, taxes and dividends.
+
+## License
+
+The code is under the [MIT License](LICENSE). It does not cover market data, and Yahoo's
+and NSE's own terms apply to any data you download.
+
+## Build history
+
+The project was built in 12 phases. The sections below record what each one added.
 
 ## What Phase 1 does
 
