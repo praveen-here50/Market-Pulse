@@ -13,8 +13,8 @@ rem Portfolio data passes through n8n, so nothing is reported back to its makers
 set "N8N_DIAGNOSTICS_ENABLED=false"
 set "N8N_VERSION_NOTIFICATIONS_ENABLED=false"
 
-rem Workflows read MARKETPULSE_API_URL from here, so they hold no fixed address.
-rem Keep secrets out of this file: they go in n8n's encrypted credentials.
+rem Workflows read MARKETPULSE_API_URL and TELEGRAM_CHAT_ID from the environment, so
+rem exported files hold neither. Secrets go in n8n's encrypted credentials instead.
 set "N8N_BLOCK_ENV_ACCESS_IN_NODE=false"
 
 call "%~dp0node_modules\.bin\n8n.cmd" %*

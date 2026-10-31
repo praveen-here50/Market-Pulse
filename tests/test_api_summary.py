@@ -39,12 +39,13 @@ def make_history(bars=30):
 class FakeProvider:
     name = "Fake provider"
 
-    def __init__(self, broken=()):
+    def __init__(self, broken=(), message="simulated outage"):
         self.broken = broken
+        self.message = message
 
     def fetch_daily(self, ticker, period):
         if ticker in self.broken:
-            raise ConnectionError("simulated outage")
+            raise ConnectionError(self.message)
         return make_history()
 
 
@@ -130,6 +131,80 @@ def test_a_total_outage_invents_nothing(market):
     assert all(stock["close"] is None for stock in body["stocks"])
     assert "Source: none available" in body["text"]
     assert "INR" not in body["text"]
+
+
+def test_a_full_report_has_no_incomplete_line(market):
+    market(FakeProvider())
+
+    assert "INCOMPLETE" not in client.get("/summary").json()["text"]
+
+
+def test_a_partial_report_says_so_at_the_top(market):
+    market(FakeProvider(broken=["TCS.NS"]))
+
+    lines = client.get("/summary").json()["text"].splitlines()
+
+    assert lines[1] == "INCOMPLETE: 1 of 4 stocks unavailable"
+
+
+def test_html_text_escapes_what_telegram_would_refuse(market):
+    market(FakeProvider())
+    client.post("/stocks", json={"ticker": "M&M.NS", "is_fno": True})
+
+    body = client.get("/summary").json()
+
+    assert "M&M.NS" in body["text"]
+    assert "M&amp;M.NS" in body["text_html"]
+    assert "M&M.NS" not in body["text_html"]
+
+
+def test_html_text_escapes_error_messages(market):
+    market(FakeProvider(broken=["TCS.NS"], message="<html> bad_gateway & *down*"))
+
+    text_html = client.get("/summary").json()["text_html"]
+
+    assert "&lt;html&gt; bad_gateway &amp; *down*" in text_html
+    assert "<" not in text_html
+
+
+def many_stocks(count, problem=None):
+    return [
+        api.StockSummary(
+            ticker=f"STOCK{number}.NS",
+            close=100.0,
+            last_bar="2026-10-30",
+            source="Fake provider",
+            problem=problem,
+        )
+        for number in range(count)
+    ]
+
+
+def test_a_report_that_fits_is_not_cut():
+    text = api.summary_text(many_stocks(50), NOW)
+
+    assert "not shown" not in text
+    assert "STOCK49.NS" in text
+
+
+def test_a_long_report_is_cut_and_says_how_much_is_missing():
+    stocks = many_stocks(200)
+
+    lines = api.summary_text(stocks, NOW).splitlines()
+
+    shown = sum(line.startswith("STOCK") for line in lines)
+    assert 0 < shown < 200
+    assert f"{200 - shown} more stocks not shown" in lines
+    assert lines[-1] == api.DISCLAIMER
+
+
+def test_a_long_report_stays_under_telegrams_limit():
+    outage = many_stocks(200, problem="Yahoo (unofficial): download failed: " + "x" * 300)
+
+    text = api.summary_text(outage, NOW)
+
+    assert len(text) <= 4096
+    assert text.splitlines()[1] == "INCOMPLETE: 200 of 200 stocks unavailable"
 
 
 def test_summary_uses_finished_sessions_only(market):

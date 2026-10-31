@@ -1,0 +1,114 @@
+{
+  "id": "mpDailyPhase0009",
+  "name": "MarketPulse daily report",
+  "active": false,
+  "nodes": [
+    {
+      "id": "7a1e2b3c-4d5e-4f60-8a71-0b1c2d3e0a01",
+      "name": "Weekdays at 16:30 IST",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 16 * * 1-5"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "7a1e2b3c-4d5e-4f60-8a71-0b1c2d3e0a02",
+      "name": "Run by hand",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 200],
+      "parameters": {}
+    },
+    {
+      "id": "7a1e2b3c-4d5e-4f60-8a71-0b1c2d3e0a03",
+      "name": "Get summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 100],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "url": "={{ $env.MARKETPULSE_API_URL }}/summary",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "id": "7a1e2b3c-4d5e-4f60-8a71-0b1c2d3e0a04",
+      "name": "Send report",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [480, 0],
+      "credentials": {
+        "telegramApi": {
+          "id": "marketpulseTelegram",
+          "name": "MarketPulse Telegram"
+        }
+      },
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.text_html }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      }
+    },
+    {
+      "id": "7a1e2b3c-4d5e-4f60-8a71-0b1c2d3e0a05",
+      "name": "Send failure alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [480, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "marketpulseTelegram",
+          "name": "MarketPulse Telegram"
+        }
+      },
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "MarketPulse report failed: the API did not answer after 3 tries, so there are no prices in this message. Check that the API is running.",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Weekdays at 16:30 IST": {
+      "main": [[{ "node": "Get summary", "type": "main", "index": 0 }]]
+    },
+    "Run by hand": {
+      "main": [[{ "node": "Get summary", "type": "main", "index": 0 }]]
+    },
+    "Get summary": {
+      "main": [
+        [{ "node": "Send report", "type": "main", "index": 0 }],
+        [{ "node": "Send failure alert", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata"
+  },
+  "pinData": {}
+}

@@ -11,6 +11,7 @@ downloads. FastAPI runs plain functions in a thread pool, so one slow download
 does not freeze the server.
 """
 
+import html
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Literal
@@ -51,11 +52,14 @@ SPLIT_LOOKBACK = timedelta(days=10)
 # holding, so holdings skip the saved copy for this long after a split.
 RECENT_SPLIT = timedelta(days=7)
 
+# Telegram's limit is 4096 characters. This leaves room for it to count differently.
+MAX_REPORT_LENGTH = 4000
+
 PRICE_DIGITS = 2
 FRACTION_DIGITS = 6
 RSI_DIGITS = 1
 
-app = FastAPI(title="MarketPulse API", version="0.8.0", description=DISCLAIMER)
+app = FastAPI(title="MarketPulse API", version="0.9.0", description=DISCLAIMER)
 
 
 @app.exception_handler(user_data.Rejected)
@@ -175,6 +179,7 @@ class SummaryResponse(BaseModel):
     complete: bool
     stocks: list[StockSummary]
     text: str
+    text_html: str
 
 
 def rounded(value, digits):
@@ -360,16 +365,27 @@ def summary_line(stock):
 
 
 def summary_text(stocks, generated_at):
-    """Write the report automations send on, so its wording is tested here."""
+    """Write the report automations send on, so its wording is tested here.
+
+    The header and footer always fit. If the stocks do not, the last ones are left
+    out and the report says how many, because Telegram refuses a message too long.
+    """
     sources = sorted({stock.source for stock in stocks if stock.source})
-    return "\n".join(
-        [
-            f"MarketPulse summary, {generated_at:%Y-%m-%d %H:%M} IST",
-            *[summary_line(stock) for stock in stocks],
-            f"Source: {', '.join(sources) or 'none available'}",
-            DISCLAIMER,
-        ]
-    )
+    missing = sum(1 for stock in stocks if stock.problem)
+
+    header = [f"MarketPulse summary, {generated_at:%Y-%m-%d %H:%M} IST"]
+    if missing:
+        header.append(f"INCOMPLETE: {missing} of {len(stocks)} stocks unavailable")
+    footer = [f"Source: {', '.join(sources) or 'none available'}", DISCLAIMER]
+
+    lines = [summary_line(stock) for stock in stocks]
+    shown = len(lines)
+    while True:
+        cut = [f"{len(lines) - shown} more stocks not shown"] if shown < len(lines) else []
+        text = "\n".join([*header, *lines[:shown], *cut, *footer])
+        if len(text) <= MAX_REPORT_LENGTH:
+            return text
+        shown -= 1
 
 
 @app.get("/summary")
@@ -381,11 +397,14 @@ def get_summary() -> SummaryResponse:
     """
     now = pd.Timestamp.now(tz=fetch_prices.MARKET_TIMEZONE)
     stocks = [summarize_stock(ticker) for ticker in user_data.load_watchlist()]
+    text = summary_text(stocks, now)
     return SummaryResponse(
         generated_at=now,
         complete=not any(stock.problem for stock in stocks),
         stocks=stocks,
-        text=summary_text(stocks, now),
+        text=text,
+        # Telegram measures length after reading these codes, so escaping is safe.
+        text_html=html.escape(text, quote=False),
     )
 
 

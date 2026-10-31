@@ -16,10 +16,12 @@ here is financial advice.
 | 6 | Watchlist and portfolio | Done |
 | 7 | Database and caching | Done |
 | 8 | n8n installation and integration | Done |
-| 9 to 12 | Everything else in the project plan | Not started |
+| 9 | Telegram automation and scheduled reports | Done, needs your bot |
+| 10 to 12 | Everything else in the project plan | Not started |
 
 MarketPulse is a set of command-line programs, a local API, a local dashboard, a
-SQLite database and a local n8n. Nothing runs on a schedule yet, and there is no AI.
+SQLite database, and a local n8n that can send a daily Telegram report. There is no
+AI yet.
 
 ## What Phase 1 does
 
@@ -262,6 +264,50 @@ empty report.
 - `npm audit` reports 173 known issues in packages inside n8n 2.45.7, 6 of them
   critical. Do not run `npm audit fix --force`: its "fix" is a downgrade to n8n
   1.17.0. Update by changing the pinned version instead.
+
+## What Phase 9 adds
+
+The "MarketPulse daily report" workflow sends the `/summary` report to Telegram at
+16:30 IST, Monday to Friday. It holds prices for your watchlist only. Your holdings
+are never sent, because they would leave this computer.
+
+| Situation | What you get |
+| --- | --- |
+| Normal | The report |
+| Some stocks failed | The report, with `INCOMPLETE: 1 of 4 stocks unavailable` at the top |
+| Too long for one message | The first stocks, with `N more stocks not shown` |
+| API not answering | After 3 tries, an alert with no prices in it |
+| Telegram refuses the message | Nothing on Telegram. See n8n's Executions list |
+| Computer asleep, or n8n stopped | Nothing, and the missed report is not sent later |
+
+A market holiday on a weekday still sends a report. It repeats the last close with
+that session's date, so read the date in each line.
+
+### Set up your bot
+
+1. In Telegram, message `@BotFather`, send `/newbot` and copy the token. Treat it
+   like a password: never put it in a file or a chat.
+2. Send your new bot any message.
+3. Open this in your browser, with your token, and find `"chat":{"id":123456789`:
+   `https://api.telegram.org/bot<TOKEN>/getUpdates`
+4. Save the chat ID, then open a new terminal so it takes effect:
+
+   ```bat
+   setx TELEGRAM_CHAT_ID 123456789
+   ```
+
+5. Import the workflow and start n8n:
+
+   ```bat
+   automation\start_n8n.bat import:workflow --input=automation\workflows\marketpulse_daily_report.json
+   automation\start_n8n.bat start
+   ```
+
+6. In n8n, open Credentials, create a "Telegram API" credential and paste the token.
+7. Open "MarketPulse daily report". In both Telegram nodes, select your credential.
+8. Start the API, then click Execute Workflow. The report should reach Telegram.
+9. Click Publish, so the schedule runs. For it to fire, the computer must be awake
+   with the API and n8n both running.
 
 ## Setup (Command Prompt)
 
