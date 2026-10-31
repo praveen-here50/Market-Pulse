@@ -2,12 +2,12 @@
 
 import pytest
 
-import user_data
+import database
 
 
 @pytest.fixture(autouse=True)
 def private_user_data(tmp_path, monkeypatch):
     """Point every test at an empty folder, so no test can touch real holdings."""
     folder = tmp_path / "user"
-    monkeypatch.setattr(user_data, "DATA_FOLDER", folder)
+    monkeypatch.setattr(database, "DATA_FOLDER", folder)
     return folder

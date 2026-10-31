@@ -24,6 +24,7 @@ import analytics
 import analyze_prices
 import fetch_prices
 import portfolio
+import price_cache
 import user_data
 from market_data.service import SplitsUnavailable, fetch_splits, fetch_with_fallback
 
@@ -45,11 +46,16 @@ TICKER_PATTERN = r"^[A-Z0-9&-]+\.NS$"
 # trade made today, which would look like a failed download.
 SPLIT_LOOKBACK = timedelta(days=10)
 
+# A split rewrites past prices, so a saved copy may be in the old share count while
+# the split list is already in the new one. Multiplying the two would misstate a
+# holding, so holdings skip the saved copy for this long after a split.
+RECENT_SPLIT = timedelta(days=7)
+
 PRICE_DIGITS = 2
 FRACTION_DIGITS = 6
 RSI_DIGITS = 1
 
-app = FastAPI(title="MarketPulse API", version="0.6.0", description=DISCLAIMER)
+app = FastAPI(title="MarketPulse API", version="0.7.0", description=DISCLAIMER)
 
 
 @app.exception_handler(user_data.Rejected)
@@ -172,9 +178,9 @@ def data_unavailable(ticker, failures):
     )
 
 
-def load_clean_bars(ticker, period, check):
-    """Return (clean bars, source, placeholder notes and fallback notes)."""
-    result = fetch_with_fallback(ticker, period, check)
+def load_clean_bars(ticker, period, check, now, market_close, use_saved=True):
+    """Return (clean bars, source, notes on placeholders, fallbacks and saved copies)."""
+    result = price_cache.fetch(ticker, period, check, now, market_close, use_saved)
     if result.history is None:
         raise data_unavailable(ticker, result.failures)
 
@@ -183,6 +189,8 @@ def load_clean_bars(ticker, period, check):
         raise data_unavailable(ticker, ["no real bars left after cleaning"])
 
     notes = [f"fallback used because {failure}" for failure in result.failures]
+    if result.downloaded_at is not None:
+        notes.append(f"saved copy, downloaded {result.downloaded_at:%Y-%m-%d %H:%M} IST")
     if len(removed) > 0:
         dates = ", ".join(f"{day:%Y-%m-%d}" for day in removed)
         notes.append(f"removed {len(removed)} zero-volume placeholder bar(s): {dates}")
@@ -252,7 +260,7 @@ def get_history(ticker: str, period: Literal["1mo", "1y"] = "1mo") -> HistoryRes
     now = pd.Timestamp.now(tz=fetch_prices.MARKET_TIMEZONE)
 
     bars, source, notes = load_clean_bars(
-        ticker, period, lambda table: fetch_prices.validate_history(table, now)
+        ticker, period, lambda table: fetch_prices.validate_history(table, now), now, market_close
     )
     return HistoryResponse(
         ticker=ticker,
@@ -274,6 +282,8 @@ def get_metrics(ticker: str) -> MetricsResponse:
         ticker,
         analyze_prices.ANALYSIS_PERIOD,
         lambda table: analyze_prices.validate_for_analysis(table, now),
+        now,
+        market_close,
     )
     # Placeholders are already gone, so this only leaves out an unfinished bar.
     finished, unfinished_notes = analyze_prices.prepare_history(bars, now, market_close)
@@ -360,10 +370,19 @@ def delete_trade(trade_id: str):
     user_data.delete_trade(trade_id, check)
 
 
-def latest_finished_close(ticker, instrument, now):
+def has_recent_split(splits, now):
+    return any(now.date() - date.fromisoformat(day) <= RECENT_SPLIT for day in splits)
+
+
+def latest_finished_close(ticker, instrument, now, use_saved):
     """Return (close, date, source) of the last finished session, or raise 503."""
     bars, source, _ = load_clean_bars(
-        ticker, fetch_prices.PERIOD, lambda table: fetch_prices.validate_history(table, now)
+        ticker,
+        fetch_prices.PERIOD,
+        lambda table: fetch_prices.validate_history(table, now),
+        now,
+        instrument.market_close,
+        use_saved,
     )
     finished, _ = analyze_prices.prepare_history(bars, now, instrument.market_close)
     if finished.empty:
@@ -374,7 +393,8 @@ def latest_finished_close(ticker, instrument, now):
 def value_holding(ticker, instrument, trades, now):
     """Return one stock's holding. A missing input gives nulls and a reason, not a guess."""
     try:
-        position = portfolio.replay(trades, splits_for(ticker, trades))
+        splits = splits_for(ticker, trades)
+        position = portfolio.replay(trades, splits)
         holding = Holding(
             ticker=ticker,
             quantity=rounded(position.quantity, FRACTION_DIGITS),
@@ -387,7 +407,9 @@ def value_holding(ticker, instrument, trades, now):
             holding.unrealised = 0.0
             return holding
 
-        close, close_date, source = latest_finished_close(ticker, instrument, now)
+        close, close_date, source = latest_finished_close(
+            ticker, instrument, now, use_saved=not has_recent_split(splits, now)
+        )
     except SplitsUnavailable as error:
         return Holding(ticker=ticker, problem=str(error))
     except HTTPException as error:

@@ -14,10 +14,11 @@ here is financial advice.
 | 4 | FastAPI backend and API endpoints | Done |
 | 5 | Streamlit dashboard and interactive charts | Done |
 | 6 | Watchlist and portfolio | Done |
-| 7 to 12 | Everything else in the project plan | Not started |
+| 7 | Database and caching | Done |
+| 8 to 12 | Everything else in the project plan | Not started |
 
-MarketPulse is a set of command-line programs, a local API and a local dashboard.
-There is no database, automation or AI yet.
+MarketPulse is a set of command-line programs, a local API, a local dashboard and
+a SQLite database. There is no automation or AI yet.
 
 ## What Phase 1 does
 
@@ -106,8 +107,7 @@ http://127.0.0.1:8000/docs to try each endpoint in the browser:
 
 Percentages are fractions (0.05 means 5%). A value we cannot calculate is `null`.
 The API listens only on this computer and has no login, so do not expose it to a
-network. Each data request fetches from Yahoo again, because caching arrives in
-Phase 7.
+network.
 
 ## What Phase 5 adds
 
@@ -143,7 +143,7 @@ The dashboard has Watchlist and Portfolio tabs, backed by new API endpoints.
 | `GET /portfolio` | Values every holding at the last finished close |
 
 - Your data stays in `data\user` on this computer. Git ignores it. Back it up
-  yourself, because Git will not. Phase 7 replaces these files with a database.
+  yourself, because Git will not.
 - Holdings are always recalculated from your trades, using the average cost
   method. To correct a mistake, delete the trade and record it again.
 - Splits and bonus issues are applied automatically from Yahoo's history.
@@ -153,6 +153,54 @@ The dashboard has Watchlist and Portfolio tabs, backed by new API endpoints.
   F&O, because closing time depends on it and MarketPulse never reads NSE's list.
 - Results leave out brokerage, taxes and dividends, so they are not your real
   returns or tax figures. Nothing here is financial advice.
+
+## What Phase 7 adds
+
+The watchlist and trades move into a SQLite database, `data\user\marketpulse.db`,
+and the API keeps recent downloads there. The endpoints have not changed. SQLite
+comes with Python, so there is nothing new to install.
+
+| Table | Holds |
+| --- | --- |
+| `watchlist` | Followed stocks, in the order they were added |
+| `trades` | Every buy and sell. A trade must name a stock on the watchlist |
+| `price_downloads` | When each saved download was made and by which provider |
+| `price_bars` | The bars of each saved download |
+
+### Your Phase 6 files
+
+The first start imports `watchlist.json` and `trades.json` by itself. It is all or
+nothing: a damaged file stops the import with an error and saves nothing. The JSON
+files stay in place but are no longer read or updated, so they are only a backup
+of your data at the moment of the import. Do not delete `marketpulse.db` to fix
+something: the next start would import those old files and lose every later trade.
+
+To back up, stop the API and copy `marketpulse.db` somewhere safe.
+
+### Saved prices
+
+The API reuses a download for up to 15 minutes, and the dashboard keeps answers for
+5 more, so a price you see can be about 20 minutes older than Yahoo's. These are
+daily bars either way, never live prices.
+
+- A saved copy is labelled in `notes`, such as
+  `saved copy, downloaded 2026-10-31 09:04 IST`, and the dashboard shows that note.
+- A copy made during a session is thrown away once that session closes, so an
+  unfinished bar is never reported as the day's close.
+- If Yahoo is down and the copy has expired, you get the fallback or an error, not
+  old data.
+- Fallback answers are not saved, so Yahoo's recovery shows up straight away.
+- Splits are never saved, and holdings skip saved prices for 7 days after a split.
+  Mixing prices and share counts from either side of a split would misstate a
+  holding. So `/portfolio` still asks Yahoo once per stock for its splits.
+- `fetch_prices.py`, `analyze_prices.py` and `check_providers.py` always download.
+
+To run a test copy without touching your data, set `MARKETPULSE_DATA_FOLDER`:
+
+```bat
+set MARKETPULSE_DATA_FOLDER=%TEMP%\marketpulse-test
+.venv\Scripts\python.exe -m uvicorn api:app --port 8010
+```
 
 ## Setup (Command Prompt)
 
