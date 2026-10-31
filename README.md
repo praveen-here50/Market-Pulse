@@ -19,7 +19,7 @@ here is financial advice.
 | 9 | Telegram automation and scheduled reports | Done |
 | 10 | Gemini AI integration | Done |
 | 11 | Market analytics, news and alerts | Done |
-| 12 | Testing, optimization and deployment | Not started |
+| 12 | Testing, optimization and deployment | Done |
 
 MarketPulse is a set of command-line programs, a local API, a local dashboard, a
 SQLite database, and a local n8n that can send a daily Telegram report with a short
@@ -147,8 +147,8 @@ The dashboard has Watchlist and Portfolio tabs, backed by new API endpoints.
 | `DELETE /trades/{id}` | Deletes a trade. Refused if a later sale needs its shares |
 | `GET /portfolio` | Values every holding at the last finished close |
 
-- Your data stays in `data\user` on this computer. Git ignores it. Back it up
-  yourself, because Git will not.
+- Your data stays in `data\user` on this computer. Git ignores it. See Phase 12 for
+  backups.
 - Holdings are always recalculated from your trades, using the average cost
   method. To correct a mistake, delete the trade and record it again.
 - Splits and bonus issues are applied automatically from Yahoo's history.
@@ -180,7 +180,7 @@ files stay in place but are no longer read or updated, so they are only a backup
 of your data at the moment of the import. Do not delete `marketpulse.db` to fix
 something: the next start would import those old files and lose every later trade.
 
-To back up, stop the API and copy `marketpulse.db` somewhere safe.
+See Phase 12 for backups.
 
 ### Saved prices
 
@@ -410,6 +410,61 @@ Coverage is thin. On 31 Oct 2026, Infosys had 5 headlines, M&M had 3 and TCS and
 had none. No headlines does not mean nothing happened. Yahoo's ticker tags are unreliable,
 so a headline must name the company, and related companies can still slip through: M&M's
 list included Tech Mahindra.
+
+## What Phase 12 adds
+
+MarketPulse is deployed on this computer, not on the internet. It holds your trades and
+has no login, so every part listens only on 127.0.0.1. Putting it online would first
+need a login, HTTPS and a hosting account.
+
+### Start everything
+
+```bat
+run_marketpulse.bat
+```
+
+This backs up the database, then opens the API, dashboard and n8n in minimized windows.
+The dashboard is at http://127.0.0.1:8501 and n8n at http://127.0.0.1:5678. Close the
+windows to stop them.
+
+To start MarketPulse whenever you log in to Windows, or to stop doing that:
+
+```bat
+automation\autostart.bat on
+automation\autostart.bat off
+```
+
+The scheduled reports need the computer awake at 16:30 and 16:40 IST. Windows must not
+be asleep then, and a missed report is not sent later.
+
+### Backups
+
+`run_marketpulse.bat` keeps the last 14 copies in `data\user\backups`. To make one by
+hand:
+
+```bat
+.venv\Scripts\python.exe backup_data.py
+```
+
+These are on the same disk as the database, so a disk failure would lose both. Copy one
+somewhere else now and then. To restore, stop MarketPulse and copy a backup over
+`data\user\marketpulse.db`. Your `.env` and `data\n8n` are not included.
+
+### Test results
+
+Measured on 31 Oct 2026.
+
+| Check | Result |
+| --- | --- |
+| Clean install from a fresh export | All tests pass |
+| `pip-audit` on `requirements.txt` | No known issues |
+| `npm audit` on n8n 2.45.7 | 173 issues inside n8n, 6 critical. No newer stable release |
+| Line coverage | 99% |
+| `/metrics` from a saved copy | 14 ms |
+| `/metrics` after a new download | About 0.9 s |
+
+Saved copies are already fast, so nothing was added for speed. The slow part is waiting
+for Yahoo.
 
 ## Setup (Command Prompt)
 

@@ -1,0 +1,8 @@
+# The dashboard shows the portfolio and has no login, so it stays on this computer.
+# Streamlit's default listens on every network address.
+[server]
+address = "127.0.0.1"
+headless = true
+
+[browser]
+gatherUsageStats = false

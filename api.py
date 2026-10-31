@@ -82,7 +82,7 @@ PRICE_DIGITS = 2
 FRACTION_DIGITS = 6
 RSI_DIGITS = 1
 
-app = FastAPI(title="MarketPulse API", version="0.11.0", description=DISCLAIMER)
+app = FastAPI(title="MarketPulse API", version="1.0.0", description=DISCLAIMER)
 
 
 @app.exception_handler(user_data.Rejected)
