@@ -2,7 +2,22 @@
 
 An Indian stock market intelligence platform, built phase by phase as a
 learning and portfolio project. For educational and personal use only. Nothing
-here is financial advice.
+here is financial advice. It is not affiliated with Yahoo, NSE, Google or Telegram.
+
+## Try the demo
+
+The demo is the real dashboard running on made-up prices. It needs no keys or accounts,
+contacts no provider and holds no real data:
+
+```bat
+py -3.12 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+run_demo.bat
+```
+
+It opens at http://127.0.0.1:8502. Every stock is an invented `DEMO-` company, and real
+tickers are refused. What you change is lost when it restarts. The Automation tab shows
+the Telegram report and alerts as text, because the demo sends nothing.
 
 ## Status
 
@@ -216,8 +231,8 @@ it. The report is written in Python, where tests can check it, so n8n only moves
 ```json
 {
   "complete": true,
-  "stocks": [{"ticker": "TCS.NS", "close": 2502.6, "problem": null}],
-  "text": "MarketPulse summary, 2026-10-31 09:22 IST\nTCS.NS: 2,502.60 INR on ..."
+  "stocks": [{"ticker": "SAMPLE.NS", "close": 100.0, "problem": null}],
+  "text": "MarketPulse summary, 2026-10-31 09:22 IST\nSAMPLE.NS: 100.00 INR on ..."
 }
 ```
 
@@ -318,7 +333,7 @@ report asks for it. The calculated numbers do not change, and the plain `/summar
 never contacts Gemini.
 
 ```text
-AI note (Gemini, can be wrong, not advice): INFY.NS changed +3.36% to 1,185.00 INR...
+AI note (Gemini, can be wrong, not advice): SAMPLE.NS changed +1.00% to 100.00 INR...
 ```
 
 Gemini only rewords your watchlist's prices. `commentary.py` checks every note, and
@@ -488,6 +503,7 @@ The tests use synthetic data and need no network.
 
 ## Data disclosure
 
+- The public demo shows only made-up data. Real data stays on the owner's computer.
 - Data comes from Yahoo Finance through `yfinance`, an unofficial library. It
   is not an NSE or BSE feed and can change or break without notice.
 - Bhavcopy data belongs to NSE and is for personal, non-commercial or

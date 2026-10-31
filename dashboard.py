@@ -125,7 +125,8 @@ def apply_change(method, path, body=None):
 
 def show_watchlist(stocks):
     """Show the followed stocks, with forms to add and remove them."""
-    st.dataframe(support.watchlist_table(stocks), width="stretch")
+    if stocks:
+        st.dataframe(support.watchlist_table(stocks), width="stretch")
 
     with st.form("add_stock", clear_on_submit=True):
         st.subheader("Add a stock")
@@ -137,11 +138,12 @@ def show_watchlist(stocks):
         if st.form_submit_button("Add to watchlist") and ticker:
             apply_change("POST", "/stocks", {"ticker": ticker.strip().upper(), "is_fno": is_fno})
 
-    with st.form("remove_stock"):
-        st.subheader("Remove a stock")
-        ticker = st.selectbox("Stock to remove", [stock["ticker"] for stock in stocks])
-        if st.form_submit_button("Remove from watchlist"):
-            apply_change("DELETE", f"/stocks/{ticker}")
+    if stocks:
+        with st.form("remove_stock"):
+            st.subheader("Remove a stock")
+            ticker = st.selectbox("Stock to remove", [stock["ticker"] for stock in stocks])
+            if st.form_submit_button("Remove from watchlist"):
+                apply_change("DELETE", f"/stocks/{ticker}")
 
 
 def show_market_overview():
@@ -225,6 +227,36 @@ def show_insights(tickers):
     show_alerts(tickers)
 
 
+def show_automation():
+    """Show the demo what the automated messages look like. Only the demo has this tab."""
+    st.subheader("Daily report")
+    st.write(
+        "The real system sends this to Telegram at 16:30 IST on weekdays, using n8n. "
+        "The demo sends nothing, so this shows the same report on sample data."
+    )
+    summary = support.fetch_json("/summary")
+    st.code(summary["text"], language=None)
+
+    st.subheader("AI note")
+    st.write(
+        "The real report adds a short Gemini note, and Python rejects it if it has an "
+        "invented number, advice or a prediction. The demo never contacts Gemini, so "
+        "this example is filled in from the report above."
+    )
+    st.code(support.example_ai_note(summary["stocks"]), language=None)
+
+    st.subheader("Alerts")
+    st.write(
+        "The real system checks alerts at 16:40 IST and sends anything new. Each alert "
+        "fires once when its condition becomes true."
+    )
+    if st.button("Run the alert check"):
+        result = support.send_json("POST", "/alerts/check")
+        st.code(result["text"], language=None)
+        if not result["fired"]:
+            st.caption("No new alerts. Each one fires once, so this session has nothing to send.")
+
+
 def show_portfolio_summary(portfolio):
     """Show the totals and holdings. Any unknown value is called out, not summed around."""
     tiles = [
@@ -294,6 +326,8 @@ def show_portfolio(stocks):
 def main():
     st.set_page_config(page_title="MarketPulse", layout="wide")
     st.title("MarketPulse")
+    if support.DEMO_NOTICE:
+        st.warning(support.DEMO_NOTICE)
     st.info(
         "Delayed daily bars, not live exchange prices. Indicators describe past "
         "prices and are not predictions or financial advice."
@@ -302,9 +336,15 @@ def main():
     try:
         stocks = support.fetch_json("/stocks")
         tickers = [stock["ticker"] for stock in stocks]
-        market_tab, insights_tab, watchlist_tab, portfolio_tab = st.tabs(
-            ["Market", "Insights", "Watchlist", "Portfolio"]
-        )
+        if not tickers:
+            st.warning("The watchlist is empty. Add a stock to see the other pages.")
+            show_watchlist(stocks)
+            return
+
+        tab_names = ["Market", "Insights", "Watchlist", "Portfolio"]
+        if support.DEMO_NOTICE:
+            tab_names.append("Automation")
+        market_tab, insights_tab, watchlist_tab, portfolio_tab, *demo_tabs = st.tabs(tab_names)
 
         with market_tab:
             stock_column, view_column = st.columns([2, 3])
@@ -323,6 +363,10 @@ def main():
 
         with portfolio_tab:
             show_portfolio(stocks)
+
+        for automation_tab in demo_tabs:
+            with automation_tab:
+                show_automation()
     except support.ApiNotRunning:
         st.error("The MarketPulse API is not running. Start it in another terminal:")
         st.code(START_API_COMMAND, language="bat")

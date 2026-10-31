@@ -509,3 +509,13 @@ def test_analytics_table_shows_unknown_values_as_na():
 
     assert table.loc["TCS.NS", "SMA 200"] == "n/a"
     assert table.loc["TCS.NS", "From 52W high"] == "-5.00%"
+
+
+def test_an_empty_watchlist_does_not_break_the_page(monkeypatch):
+    serve(monkeypatch, stocks=[])
+
+    page = run_page()
+
+    assert not page.exception
+    assert "The watchlist is empty" in page.warning[0].value
+    assert "Add to watchlist" in [button.label for button in page.button]

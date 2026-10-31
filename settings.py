@@ -10,7 +10,8 @@ ENV_FILE = Path(__file__).parent / ".env"
 
 
 def load_env_file(path=ENV_FILE):
-    if not path.exists():
+    # The public demo must not hold real keys, even on the owner's computer.
+    if os.environ.get("MARKETPULSE_DEMO") or not path.exists():
         return
     for line in path.read_text(encoding="utf-8-sig").splitlines():
         name, separator, value = line.partition("=")

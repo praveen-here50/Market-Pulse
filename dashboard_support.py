@@ -15,6 +15,11 @@ import analytics
 API_URL = os.environ.get("MARKETPULSE_API_URL", "http://127.0.0.1:8000")
 REQUEST_TIMEOUT_SECONDS = 60
 MISSING = "n/a"
+
+# The public demo replaces these. See demo.py.
+client = httpx
+DEMO_NOTICE = None
+
 ALERT_KINDS = {
     "close_above": "Close above",
     "close_below": "Close below",
@@ -104,7 +109,7 @@ def rejection_message(response):
 def send_json(method, path, body=None):
     """Send a change to the API. Return its JSON answer, or None if it has none."""
     try:
-        response = httpx.request(
+        response = client.request(
             method, f"{API_URL}{path}", json=body, timeout=REQUEST_TIMEOUT_SECONDS
         )
     except httpx.TransportError as error:
@@ -121,7 +126,7 @@ def send_json(method, path, body=None):
 def fetch_json(path):
     """Return the API's JSON answer for a path, or raise one of the errors above."""
     try:
-        response = httpx.get(f"{API_URL}{path}", timeout=REQUEST_TIMEOUT_SECONDS)
+        response = client.get(f"{API_URL}{path}", timeout=REQUEST_TIMEOUT_SECONDS)
     except httpx.TransportError as error:
         raise ApiNotRunning(str(error)) from error
 
@@ -276,6 +281,17 @@ def analytics_table(stocks):
         for stock in stocks
     ]
     return pd.DataFrame(rows).set_index("Stock")
+
+
+def example_ai_note(stocks):
+    """Fill in a note for the demo, which never contacts Gemini, from the report's values."""
+    parts = [
+        f"{stock['ticker']} changed {format_percent(stock['change_1d'])} "
+        f"with an RSI of {format_rsi(stock['rsi_14'])}"
+        for stock in stocks[:2]
+        if not stock["problem"]
+    ]
+    return f"EXAMPLE: {', and '.join(parts)}." if parts else "EXAMPLE: no stocks to describe."
 
 
 def alert_label(alert):
