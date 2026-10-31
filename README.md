@@ -17,11 +17,12 @@ here is financial advice.
 | 7 | Database and caching | Done |
 | 8 | n8n installation and integration | Done |
 | 9 | Telegram automation and scheduled reports | Done, needs your bot |
-| 10 to 12 | Everything else in the project plan | Not started |
+| 10 | Gemini AI integration | Done, needs your key |
+| 11 and 12 | Everything else in the project plan | Not started |
 
 MarketPulse is a set of command-line programs, a local API, a local dashboard, a
-SQLite database, and a local n8n that can send a daily Telegram report. There is no
-AI yet.
+SQLite database, and a local n8n that can send a daily Telegram report with a short
+checked note from Gemini.
 
 ## What Phase 1 does
 
@@ -308,6 +309,60 @@ that session's date, so read the date in each line.
 8. Start the API, then click Execute Workflow. The report should reach Telegram.
 9. Click Publish, so the schedule runs. For it to fire, the computer must be awake
    with the API and n8n both running.
+
+## What Phase 10 adds
+
+`GET /summary?ai=true` adds a short note from Gemini to the report, and the daily
+report asks for it. The calculated numbers do not change, and the plain `/summary`
+never contacts Gemini.
+
+```text
+AI note (Gemini, can be wrong, not advice): INFY.NS changed +3.36% to 1,185.00 INR...
+```
+
+Gemini only rewords your watchlist's prices. `commentary.py` checks every note, and
+one failed check drops the whole note:
+
+| Check | Why |
+| --- | --- |
+| Every number and date must be in the data, with the same sign | A model can invent a figure, or reverse a fall into a rise |
+| No advice, predictions or causes | It has no news, so any reason would be a guess |
+| No direction words like rose or fell | The signed figure says it, and can be checked |
+| Finished answer, 600 characters at most | A note cut off mid-sentence can mislead |
+
+If there is no usable note for any reason, the price report still goes out with a
+line such as `AI note unavailable: GEMINI_API_KEY is not set`. The checks are strict
+on purpose, so expect some notes to be dropped.
+
+Only watchlist tickers and prices are sent. Your holdings and trades never are. On
+Gemini's free tier, Google may use what you send and people may read it, which is
+another reason they stay here. Google's terms also say not to rely on it for
+financial advice.
+
+### Set up your key
+
+1. Create a key at https://aistudio.google.com/apikey. Treat it like a password.
+2. Save it, then open a new terminal so the API can see it:
+
+   ```bat
+   setx GEMINI_API_KEY your-key-here
+   ```
+
+3. Start the API from that new terminal, and try it:
+
+   ```bat
+   .venv\Scripts\python.exe -m uvicorn api:app --reload
+   ```
+
+   Open http://127.0.0.1:8000/summary?ai=true in your browser.
+
+4. Re-import the workflow so n8n uses the new address:
+
+   ```bat
+   automation\start_n8n.bat import:workflow --input=automation\workflows\marketpulse_daily_report.json
+   ```
+
+The model is `gemini-3.5-flash-lite`. Set `GEMINI_MODEL` to use another.
 
 ## Setup (Command Prompt)
 

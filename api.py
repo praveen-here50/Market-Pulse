@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 
 import analytics
 import analyze_prices
+import commentary
 import fetch_prices
 import portfolio
 import price_cache
@@ -59,7 +60,7 @@ PRICE_DIGITS = 2
 FRACTION_DIGITS = 6
 RSI_DIGITS = 1
 
-app = FastAPI(title="MarketPulse API", version="0.9.0", description=DISCLAIMER)
+app = FastAPI(title="MarketPulse API", version="0.10.0", description=DISCLAIMER)
 
 
 @app.exception_handler(user_data.Rejected)
@@ -178,6 +179,8 @@ class SummaryResponse(BaseModel):
     generated_at: datetime
     complete: bool
     stocks: list[StockSummary]
+    ai_note: str | None = None
+    ai_problem: str | None = None
     text: str
     text_html: str
 
@@ -364,7 +367,14 @@ def summary_line(stock):
     return f"{stock.ticker}: {stock.close:,.2f} INR on {stock.last_bar}, 1D {change}, RSI {rsi}"
 
 
-def summary_text(stocks, generated_at):
+def ai_lines(note):
+    """Label the AI's words, so they are never mistaken for calculated values."""
+    if note.text:
+        return [f"AI note (Gemini, can be wrong, not advice): {note.text}"]
+    return [f"AI note unavailable: {note.problem}"]
+
+
+def summary_text(stocks, generated_at, extra_lines=()):
     """Write the report automations send on, so its wording is tested here.
 
     The header and footer always fit. If the stocks do not, the last ones are left
@@ -376,7 +386,7 @@ def summary_text(stocks, generated_at):
     header = [f"MarketPulse summary, {generated_at:%Y-%m-%d %H:%M} IST"]
     if missing:
         header.append(f"INCOMPLETE: {missing} of {len(stocks)} stocks unavailable")
-    footer = [f"Source: {', '.join(sources) or 'none available'}", DISCLAIMER]
+    footer = [*extra_lines, f"Source: {', '.join(sources) or 'none available'}", DISCLAIMER]
 
     lines = [summary_line(stock) for stock in stocks]
     shown = len(lines)
@@ -389,19 +399,32 @@ def summary_text(stocks, generated_at):
 
 
 @app.get("/summary")
-def get_summary() -> SummaryResponse:
+def get_summary(ai: bool = False) -> SummaryResponse:
     """Return every stock's last finished close, as data and as ready-to-send text.
 
     One stock failing does not fail the rest, so check `complete` before treating
     this as the whole watchlist.
+
+    With `ai=true`, the text also carries a checked note from Gemini. If there is no
+    usable note, the report still arrives and says why.
     """
     now = pd.Timestamp.now(tz=fetch_prices.MARKET_TIMEZONE)
     stocks = [summarize_stock(ticker) for ticker in user_data.load_watchlist()]
-    text = summary_text(stocks, now)
+
+    note = commentary.Commentary()
+    if ai:
+        # Only stocks with real numbers: a failure reason is not market data.
+        note = commentary.write_note(
+            [summary_line(stock) for stock in stocks if not stock.problem]
+        )
+
+    text = summary_text(stocks, now, ai_lines(note) if ai else ())
     return SummaryResponse(
         generated_at=now,
         complete=not any(stock.problem for stock in stocks),
         stocks=stocks,
+        ai_note=note.text,
+        ai_problem=note.problem,
         text=text,
         # Telegram measures length after reading these codes, so escaping is safe.
         text_html=html.escape(text, quote=False),

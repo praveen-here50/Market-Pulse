@@ -95,7 +95,8 @@ class TestEveryWorkflow:
     def test_calls_paths_the_api_really_has(self, workflow):
         known = {route.path for route in api.app.routes}
         for node in http_nodes(workflow):
-            assert node["parameters"]["url"].split("}}", 1)[1] in known
+            path = node["parameters"]["url"].split("}}", 1)[1].split("?")[0]
+            assert path in known
 
     def test_has_no_saved_sample_data(self, workflow):
         assert workflow.get("pinData", {}) == {}
@@ -123,6 +124,19 @@ def test_daily_report_sends_the_escaped_text_the_api_returns():
 
     assert report["parameters"]["text"] == "={{ $json.text_html }}"
     assert "text_html" in api.SummaryResponse.model_fields
+
+
+def test_daily_report_asks_for_the_ai_note():
+    workflow = load("marketpulse_daily_report.json")
+    summary = next(node for node in workflow["nodes"] if node["name"] == "Get summary")
+
+    assert summary["parameters"]["url"].endswith("/summary?ai=true")
+
+
+def test_only_the_api_contacts_gemini():
+    # The key stays with the API, and its checks cannot be skipped by a workflow.
+    for path in WORKFLOWS:
+        assert "generativelanguage" not in path.read_text(encoding="utf-8")
 
 
 def test_daily_report_alerts_when_the_api_fails():

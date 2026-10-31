@@ -39,7 +39,7 @@
       "waitBetweenTries": 5000,
       "onError": "continueErrorOutput",
       "parameters": {
-        "url": "={{ $env.MARKETPULSE_API_URL }}/summary",
+        "url": "={{ $env.MARKETPULSE_API_URL }}/summary?ai=true",
         "options": {
           "timeout": 120000
         }
